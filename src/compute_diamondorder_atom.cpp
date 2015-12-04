@@ -89,6 +89,7 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
   size_peratom_cols = ncol;
 
   nmax = 0;
+  comm_forward=1;
   qlmarray=NULL;
   qnarray = NULL;
   maxneigh = 0;
@@ -143,6 +144,25 @@ void ComputeDiamondOrderAtom::init_list(int id, NeighList *ptr)
 }
 
 /* ---------------------------------------------------------------------- */
+
+
+int ComputeDiamondOrderAtom::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
+    int i,j,m;
+    m=0;
+    for (i=0;i<n;i++) {
+        j=list[i];
+        buf[m++]=qlmarray[j][i_comm];
+    }
+    return m;
+}
+void ComputeDiamondOrderAtom::unpack_forward_comm(int n, int first, double *buf) {
+    int i,m,last;
+    m=0;
+    last=first+n;
+    for (i=first;i<last;i++) {
+        qlmarray[i][i_comm]=buf[m++];
+    }
+}
 
 void ComputeDiamondOrderAtom::compute_peratom()
 {
@@ -265,7 +285,17 @@ void ComputeDiamondOrderAtom::compute_peratom()
               qlm[m*2+1]/=sWeight;
           }
       }
+      if (atom->tag[i]==3723||atom->tag[i]==2048) {
+          //printf("%d %d\n",i,atom->tag[i]);
+          int m;
+          for (m=0;m<=2*ndegree;m++) {
+           //   printf("%f\t%f\n",qlm[m*2],qlm[m*2+1]);
+          }
+      }
     }
+  }
+  for (i_comm=0;i_comm<=2*(ndegree*2+1);i_comm++) {
+      comm->forward_comm_compute(this);
   }
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
@@ -330,20 +360,12 @@ void ComputeDiamondOrderAtom::compute_peratom()
           double delx=atom->x[j][0]-atom->x[i][0];
           double dely=atom->x[j][1]-atom->x[i][1];
           double delz=atom->x[j][2]-atom->x[i][2];
+          if (atom->tag[i]==1702) {
+              //printf("%d\t%d\t(%f,%f,%f)-(%f,%f,%f)\n",i,j,atom->x[i][0],atom->x[i][1],atom->x[i][2],atom->x[j][0],atom->x[j][1],atom->x[j][2]);
+          }
           double weight=smearing(sqrt(delx*delx+dely*dely+delz*delz));
-
-          int k;
-          for (k=0;k<nmax;k++) {
-              if ((atom->x[j][0]==atom->x[k][0])+(atom->x[j][1]==atom->x[k][1])+(atom->x[j][2]==atom->x[k][2])>=2) {
-                  add_qn_complex(i, k, weight, &usum, &vsum);
-                  sWeight+=weight;
-                  break;
-              }
-          }
-          if (k==nmax) {
-              printf("j=%d\tk= NOT FOUND",j);
-          }
-
+          add_qn_complex(i, j, weight, &usum, &vsum);
+          sWeight+=weight;
       }
       if (ncount>0) {
           usum/=sWeight;

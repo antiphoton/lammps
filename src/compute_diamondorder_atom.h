@@ -32,6 +32,8 @@ class ComputeDiamondOrderAtom : public Compute {
   void init_list(int, class NeighList *);
   void compute_peratom();
   double memory_usage();
+  int pack_forward_comm(int, int *, double *, int, int *);
+  void unpack_forward_comm(int, int, double *);
 
  private:
   int nmax,maxneigh,ncol,nnn,ndegree;
@@ -42,6 +44,7 @@ class ComputeDiamondOrderAtom : public Compute {
 
   double **qlmarray;
   double **qnarray;
+  int i_comm;
 
   void add_qlm_complex(int m,double frr,double normx,double normy,double normz,double *u,double *v);
   void add_qn_complex(int, int, double, double*, double*);
