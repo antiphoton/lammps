@@ -84,14 +84,13 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
     } else error->all(FLERR,"Illegal compute diamondorder/atom command");
   }
 
-  ncol = 3;
   peratom_flag = 1;
-  size_peratom_cols = ncol;
+  size_peratom_cols = 0;
 
   nmax = 0;
   comm_forward=1;
   qlmarray=NULL;
-  qnarray = NULL;
+  qnvector = NULL;
   maxneigh = 0;
   distsq = NULL;
   nearest = NULL;
@@ -102,7 +101,7 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
 ComputeDiamondOrderAtom::~ComputeDiamondOrderAtom()
 {
   memory->destroy(qlmarray);
-  memory->destroy(qnarray);
+  memory->destroy(qnvector);
   memory->destroy(distsq);
   memory->destroy(nearest);
 }
@@ -176,11 +175,11 @@ void ComputeDiamondOrderAtom::compute_peratom()
 
   if (atom->nlocal > nmax) {
     memory->destroy(qlmarray);
-    memory->destroy(qnarray);
+    memory->destroy(qnvector);
     nmax = atom->nmax;
     memory->create(qlmarray,nmax,(2*ndegree+1)*2,"diamondorder/atom:qlmarray");
-    memory->create(qnarray,nmax,ncol,"diamondorder/atom:qnarray");
-    array_atom = qnarray;
+    memory->create(qnvector,nmax,"diamondorder/atom:qnvector");
+    vector_atom = qnvector;
   }
 
   // invoke full neighbor list (will copy or build if necessary)
@@ -285,21 +284,13 @@ void ComputeDiamondOrderAtom::compute_peratom()
               qlm[m*2+1]/=sWeight;
           }
       }
-      if (atom->tag[i]==3723||atom->tag[i]==2048) {
-          //printf("%d %d\n",i,atom->tag[i]);
-          int m;
-          for (m=0;m<=2*ndegree;m++) {
-           //   printf("%f\t%f\n",qlm[m*2],qlm[m*2+1]);
-          }
-      }
     }
   }
-  for (i_comm=0;i_comm<=2*(ndegree*2+1);i_comm++) {
+  for (i_comm=0;i_comm<2*(ndegree*2+1);i_comm++) {
       comm->forward_comm_compute(this);
   }
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
-    double* qn = qnarray[i];
     if (mask[i] & groupbit) {
       xtmp = x[i][0];
       ytmp = x[i][1];
@@ -360,9 +351,6 @@ void ComputeDiamondOrderAtom::compute_peratom()
           double delx=atom->x[j][0]-atom->x[i][0];
           double dely=atom->x[j][1]-atom->x[i][1];
           double delz=atom->x[j][2]-atom->x[i][2];
-          if (atom->tag[i]==1702) {
-              //printf("%d\t%d\t(%f,%f,%f)-(%f,%f,%f)\n",i,j,atom->x[i][0],atom->x[i][1],atom->x[i][2],atom->x[j][0],atom->x[j][1],atom->x[j][2]);
-          }
           double weight=smearing(sqrt(delx*delx+dely*dely+delz*delz));
           add_qn_complex(i, j, weight, &usum, &vsum);
           sWeight+=weight;
@@ -371,9 +359,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
           usum/=sWeight;
           vsum/=sWeight;
       }
-      qn[0] = usum;
-      qn[1] = vsum;
-      qn[2] = sqrt(qn[0]*qn[0]+qn[1]*qn[1]);
+      qnvector[i]=usum;
     }
   }
 }
@@ -481,7 +467,7 @@ void ComputeDiamondOrderAtom::select2(int k, int n, double *arr, int *iarr)
 
 double ComputeDiamondOrderAtom::memory_usage()
 {
-  double bytes = ncol*nmax * sizeof(double);
+  double bytes = nmax * sizeof(double);
   bytes += maxneigh * sizeof(double); 
   bytes += maxneigh * sizeof(int); 
 

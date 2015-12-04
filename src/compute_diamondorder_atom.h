@@ -36,14 +36,14 @@ class ComputeDiamondOrderAtom : public Compute {
   void unpack_forward_comm(int, int, double *);
 
  private:
-  int nmax,maxneigh,ncol,nnn,ndegree;
+  int nmax,maxneigh,nnn,ndegree;
   double cutsq,rsoft;
   class NeighList *list;
   double *distsq;
   int *nearest;
 
   double **qlmarray;
-  double **qnarray;
+  double *qnvector;
   int i_comm;
 
   void add_qlm_complex(int m,double frr,double normx,double normy,double normz,double *u,double *v);
