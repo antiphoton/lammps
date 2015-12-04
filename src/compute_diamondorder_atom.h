@@ -34,8 +34,8 @@ class ComputeDiamondOrderAtom : public Compute {
   double memory_usage();
 
  private:
-  int nmax,maxneigh,ncol,nnn,ndegree,rsoft;
-  double cutsq;
+  int nmax,maxneigh,ncol,nnn,ndegree;
+  double cutsq,rsoft;
   class NeighList *list;
   double *distsq;
   int *nearest;
@@ -43,13 +43,14 @@ class ComputeDiamondOrderAtom : public Compute {
   double **qlmarray;
   double **qnarray;
 
-  void add_qlm_complex(int m,double normx,double normy,double normz,double *u,double *v);
-  void add_qn_complex(int, int, double*, double*);
+  void add_qlm_complex(int m,double frr,double normx,double normy,double normz,double *u,double *v);
+  void add_qn_complex(int, int, double, double*, double*);
   void calc_qn_trig(double, double, double&, double&);
   void select2(int, int, double *, int *);
 
   double polar_prefactor(int, int, double);
   double associated_legendre(int, int, double);
+  double smearing(double) const;
 };
 
 }

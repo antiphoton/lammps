@@ -32,11 +32,6 @@
 #include "error.h"
 #include "math_const.h"
 
-#ifdef DBL_EPSILON
-  #define MY_EPSILON (10.0*DBL_EPSILON)
-#else
-  #define MY_EPSILON (10.0*2.220446049250313e-16)
-#endif
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -51,7 +46,7 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
   ndegree = 6;
   nnn = 6;
   cutsq = 0.0;
-  rsoft=5.5;
+  rsoft=0;
 
   // process optional args
 
@@ -61,6 +56,12 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
       if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
       ndegree = force->numeric(FLERR,arg[iarg+1]);
       if (ndegree < 0)
+        error->all(FLERR,"Illegal compute diamondorder/atom command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"rsoft") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+      rsoft = force->numeric(FLERR,arg[iarg+1]);
+      if (rsoft <= 0)
         error->all(FLERR,"Illegal compute diamondorder/atom command");
       iarg += 2;
     } else if (strcmp(arg[iarg],"nnn") == 0) {
@@ -113,8 +114,10 @@ void ComputeDiamondOrderAtom::init()
     error->all(FLERR,"Compute diamondorder/atom requires a pair style be defined");
   if (cutsq == 0.0) cutsq = force->pair->cutforce * force->pair->cutforce;
   else if (sqrt(cutsq) > force->pair->cutforce)
-    error->all(FLERR,
-               "Compute diamondorder/atom cutoff is longer than pairwise cutoff");
+    error->all(FLERR, "Compute diamondorder/atom cutoff is longer than pairwise cutoff");
+  if (rsoft<0) {
+      error->all(FLERR, "Compute diamondorder/atom rsoft is negative");
+  }
 
   // need an occasional full neighbor list
 
@@ -200,6 +203,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
       // nearest[] = atom indices of neighbors
 
       int ncount = 0;
+      double sWeight=0;
       for (jj = 0; jj < jnum; jj++) {
         j = jlist[jj];
         j &= NEIGHMASK;
@@ -238,6 +242,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
       for (int m=0;m<2*ndegree+1;m++) {
           qlm[m*2]=0;
           qlm[m*2+1]=0;
+          double sWeight=0;
 
           for (jj = 0; jj < ncount; jj++) {
             j = nearest[jj];
@@ -246,15 +251,18 @@ void ComputeDiamondOrderAtom::compute_peratom()
             delx = xtmp - x[j][0];
             dely = ytmp - x[j][1];
             delz = ztmp - x[j][2];
-            double rinv = 1.0/sqrt(delx*delx+dely*dely+delz*delz);
+            double r=sqrt(delx*delx+dely*dely+delz*delz);
+            double rinv = 1.0/r;
+            double weight=smearing(r);
             delx*=rinv;
             dely*=rinv;
             delz*=rinv;
-            add_qlm_complex(m-ndegree,delx,dely,delz,qlm+m*2,qlm+m*2+1);
+            add_qlm_complex(m-ndegree,weight,delx,dely,delz,qlm+m*2,qlm+m*2+1);
+            sWeight+=weight;
           }
           if (ncount>0) {
-              qlm[m*2]/=ncount;
-              qlm[m*2+1]/=ncount;
+              qlm[m*2]/=sWeight;
+              qlm[m*2+1]/=sWeight;
           }
       }
     }
@@ -314,19 +322,21 @@ void ComputeDiamondOrderAtom::compute_peratom()
 
       double usum = 0.0;
       double vsum = 0.0;
+      double sWeight=0;
 
       for (jj = 0; jj < ncount; jj++) {
           j = nearest[jj];
           j &= NEIGHMASK;
+          double delx=atom->x[j][0]-atom->x[i][0];
+          double dely=atom->x[j][1]-atom->x[i][1];
+          double delz=atom->x[j][2]-atom->x[i][2];
+          double weight=smearing(sqrt(delx*delx+dely*dely+delz*delz));
 
           int k;
           for (k=0;k<nmax;k++) {
               if ((atom->x[j][0]==atom->x[k][0])+(atom->x[j][1]==atom->x[k][1])+(atom->x[j][2]==atom->x[k][2])>=2) {
-                  add_qn_complex(i, k, &usum, &vsum);
-                  //printf("j=%d\tk=%d\n",j,k);
-                  if (qlmarray[k][0]==0) {
-                      //printf("j=%d\tk=%d\tZERO\n",j,k);
-                  }
+                  add_qn_complex(i, k, weight, &usum, &vsum);
+                  sWeight+=weight;
                   break;
               }
           }
@@ -336,8 +346,8 @@ void ComputeDiamondOrderAtom::compute_peratom()
 
       }
       if (ncount>0) {
-          usum/=ncount;
-          vsum/=ncount;
+          usum/=sWeight;
+          vsum/=sWeight;
       }
       qn[0] = usum;
       qn[1] = vsum;
@@ -346,8 +356,8 @@ void ComputeDiamondOrderAtom::compute_peratom()
   }
 }
 
-void ComputeDiamondOrderAtom::add_qlm_complex(int m,double x,double y,double z,double *u,double *v) {
-    double f=polar_prefactor(ndegree,m,z);
+void ComputeDiamondOrderAtom::add_qlm_complex(int m,double frr,double x,double y,double z,double *u,double *v) {
+    double f=frr*polar_prefactor(ndegree,m,z);
     double phi=atan2(y,x);
     phi*=m;
     *u += f*cos(phi);
@@ -356,7 +366,7 @@ void ComputeDiamondOrderAtom::add_qlm_complex(int m,double x,double y,double z,d
 
 // calculate order parameter using std::complex::pow function
 
-inline void ComputeDiamondOrderAtom::add_qn_complex(int i,int j, double *u, double *v) {
+inline void ComputeDiamondOrderAtom::add_qn_complex(int i,int j,double frr, double *u, double *v) {
     double x=0,y=0;
     double normI=0,normJ=0;
     int m;
@@ -374,8 +384,8 @@ inline void ComputeDiamondOrderAtom::add_qn_complex(int i,int j, double *u, doub
     }
     double normIJ=sqrt(normI*normJ);
     if (normIJ>0) {
-        *u+=x/normIJ;
-        *v+=y/normIJ;
+        *u+=x/normIJ*frr;
+        *v+=y/normIJ*frr;
     }
 }
 
@@ -503,3 +513,12 @@ associated_legendre(int l, int m, double x) {
 
   return p;
 }
+double ComputeDiamondOrderAtom::smearing(double r) const {
+    if (rsoft==0) {
+        return 1;
+    }
+    else {
+        return 1/(1+pow(r/rsoft,8));
+    }
+}
+
