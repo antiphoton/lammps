@@ -243,6 +243,41 @@ void ComputeNucleiAtom::compute_peratom()
     MPI_Allreduce(&change,&anychange,1,MPI_INT,MPI_MAX,world);
     if (!anychange) break;
   }
+  if (1) {
+      comm->forward_comm_compute(this);
+      for (ii = 0; ii < inum; ii++) {
+          i = ilist[ii];
+          if (!(mask[i] & groupbit)) continue;
+          if (isSolid[i]) {
+              continue;
+          }
+          nucleiID[i]=0;
+
+          xtmp = x[i][0];
+          ytmp = x[i][1];
+          ztmp = x[i][2];
+          jlist = firstneigh[i];
+          jnum = numneigh[i];
+
+          for (jj = 0; jj < jnum; jj++) {
+              j = jlist[jj];
+              j &= NEIGHMASK;
+              if (!(mask[j] & groupbit)) continue;
+              if (nucleiID[i] == nucleiID[j]) continue;
+              if (!isSolid[j]) {
+                  continue;
+              }
+
+              delx = xtmp - x[j][0];
+              dely = ytmp - x[j][1];
+              delz = ztmp - x[j][2];
+              rsq = delx*delx + dely*dely + delz*delz;
+              if (rsq < cutsq) {
+                  nucleiID[i] = nucleiID[j] +0.5;
+              }
+          }
+      }
+  }
 }
 
 /* ---------------------------------------------------------------------- */
