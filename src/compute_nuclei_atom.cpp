@@ -47,6 +47,8 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
   value2index=new int[nConditions];
   compareDirection=new bool[nConditions];
   threshold=new double[nConditions];
+  hardNeighbourDistance=0;
+  hardNeighbourCount=0;
   int iCondition=0;
   int iarg = 4;
   while (iarg < narg) {
@@ -56,7 +58,6 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
       if (arg[iarg][0] == 'c') {
           which[iCondition] = COMPUTE;
           value2index[iCondition]=modify->find_compute(&arg[iarg][2]);
-          puts(&arg[iarg+1][2]);
       //} else if (arg[iarg][0] == 'f') {
       //    which[iCondition] = FIX;
       //}
@@ -74,10 +75,15 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
       else error->all(FLERR,"Illegal compute diamondorder/atom command");
 
       threshold[iCondition]=force->numeric(FLERR,arg[iarg+2]);
-
+      iCondition++;
+      iarg+=2;
+    }
+    else if (strcmp(arg[iarg],"hardNeighbour") == 0) {
+        hardNeighbourDistance=force->numeric(FLERR,arg[iarg+1]);
+        hardNeighbourCount=force->numeric(FLERR,arg[iarg+2]);
+        iarg+=2;
     } else error->all(FLERR,"Illegal compute diamondorder/atom command");
-    iCondition++;
-    iarg+=3;
+    iarg++;
   }
 
   double cutoff = force->numeric(FLERR,arg[3]);
@@ -85,7 +91,7 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
 
   peratom_flag = 1;
   size_peratom_cols = 0;
-  comm_forward = 1;
+  comm_forward = 2;
 
   nmax = 0;
   nucleiID = NULL;
@@ -97,6 +103,10 @@ ComputeNucleiAtom::~ComputeNucleiAtom()
 {
   memory->destroy(isSolid);
   memory->destroy(nucleiID);
+  delete[] which;
+  delete[] value2index;
+  delete[] compareDirection;
+  delete[] threshold;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -179,8 +189,12 @@ void ComputeNucleiAtom::compute_peratom()
 
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
-    if (mask[i] & groupbit) nucleiID[i] = tag[i];
-    else nucleiID[i] = 0;
+    if (mask[i] & groupbit) {
+        nucleiID[i] = tag[i];
+    }
+    else {
+        nucleiID[i] = 0;
+    }
     isSolid[i]=checkSolid(i)?1:0;
   }
 
@@ -229,8 +243,9 @@ void ComputeNucleiAtom::compute_peratom()
           delz = ztmp - x[j][2];
           rsq = delx*delx + dely*dely + delz*delz;
           if (rsq < cutsq) {
-            nucleiID[i] = nucleiID[j] = MIN(nucleiID[i],nucleiID[j]);
-            done = 0;
+              int iMin = MIN(nucleiID[i],nucleiID[j]);
+              nucleiID[i] = nucleiID[j] = iMin;
+              done = 0;
           }
         }
       }
@@ -273,10 +288,14 @@ void ComputeNucleiAtom::compute_peratom()
               delz = ztmp - x[j][2];
               rsq = delx*delx + dely*dely + delz*delz;
               if (rsq < cutsq) {
-                  nucleiID[i] = nucleiID[j] +0.5;
+                  if (nucleiID[i]==0||nucleiID[i]>nucleiID[j]) {
+                      double iMin = nucleiID[j] +0.5;
+                      nucleiID[i] = iMin;
+                  }
               }
           }
       }
+      MPI_Barrier(world);
   }
 }
 
@@ -299,6 +318,7 @@ int ComputeNucleiAtom::pack_forward_comm(int n, int *list, double *buf,
     for (i = 0; i < n; i++) {
       j = list[i];
       buf[m++] = ubuf(mask[j]).d;
+      buf[m++] = ubuf(mask[j]).d;
     }
   }
 
@@ -320,7 +340,10 @@ void ComputeNucleiAtom::unpack_forward_comm(int n, int first, double *buf)
         }
   else {
     int *mask = atom->mask;
-    for (i = first; i < last; i++) mask[i] = (int) ubuf(buf[m++]).i;
+    for (i = first; i < last; i++) {
+        mask[i] = (int) ubuf(buf[m++]).i;
+        mask[i] = (int) ubuf(buf[m++]).i;
+    }
   }
 }
 
@@ -335,6 +358,33 @@ double ComputeNucleiAtom::memory_usage()
 }
 
 bool ComputeNucleiAtom::checkSolid(int i) const {
+    if (hardNeighbourDistance>0) {
+        double disSqr=hardNeighbourDistance*hardNeighbourDistance;
+        int neighbourCount=0;
+        double **p=atom->x;
+        double x1=p[i][0];
+        double y1=p[i][1];
+        double z1=p[i][2];
+        int *jlist=list->firstneigh[i];
+        int jnum=list->numneigh[i];
+        int jj;
+        for (jj=0;jj<jnum;jj++) {
+            int j=jlist[jj];
+            double x2=p[j][0];
+            double y2=p[j][1];
+            double z2=p[j][2];
+            double xd=x2-x1;
+            double yd=y2-y1;
+            double zd=z2-z1;
+            double currentDisSqr=xd*xd+yd*yd+zd*zd;
+            if (currentDisSqr<=disSqr) {
+                neighbourCount++;
+            }
+        }
+        if (neighbourCount<hardNeighbourCount) {
+            return false;
+        }
+    }
     bool ret=true;
     int m;
     for (m=0;m<nConditions;m++) {
@@ -358,3 +408,4 @@ bool ComputeNucleiAtom::checkSolid(int i) const {
     }
     return ret;
 }
+

@@ -41,6 +41,8 @@ class ComputeDiamondOrderAtom : public Compute {
   class NeighList *list;
   double *distsq;
   int *nearest;
+  int hydrogenId,oxygenId;
+  double devSq;
 
   double **qlmarray;
   double *qnvector;
@@ -54,6 +56,8 @@ class ComputeDiamondOrderAtom : public Compute {
   double polar_prefactor(int, int, double);
   double associated_legendre(int, int, double);
   double smearing(double) const;
+
+  bool hydrogenBond(double x1,double y1,double z1,double x2,double y2,double z2,int *iH) const;
 };
 
 }

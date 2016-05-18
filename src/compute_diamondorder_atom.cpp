@@ -47,41 +47,60 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
   nnn = 6;
   cutsq = 0.0;
   rsoft=0;
+  devSq=-1;
+  oxygenId=-1;
+  hydrogenId=-1;
+
 
   // process optional args
 
   int iarg = 3;
   while (iarg < narg) {
-    if (strcmp(arg[iarg],"degree") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
-      ndegree = force->numeric(FLERR,arg[iarg+1]);
-      if (ndegree < 0)
-        error->all(FLERR,"Illegal compute diamondorder/atom command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"rsoft") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
-      rsoft = force->numeric(FLERR,arg[iarg+1]);
-      if (rsoft <= 0)
-        error->all(FLERR,"Illegal compute diamondorder/atom command");
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"nnn") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
-      if (strcmp(arg[iarg+1],"NULL") == 0) 
-	nnn = 0;
-      else {
-	nnn = force->numeric(FLERR,arg[iarg+1]);
-	if (nnn < 0)
-	  error->all(FLERR,"Illegal compute diamondorder/atom command");
-      }
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"cutoff") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
-      double cutoff = force->numeric(FLERR,arg[iarg+1]);
-      if (cutoff <= 0.0)
-        error->all(FLERR,"Illegal compute diamondorder/atom command");
-      cutsq = cutoff*cutoff;
-      iarg += 2;
-    } else error->all(FLERR,"Illegal compute diamondorder/atom command");
+      if (strcmp(arg[iarg],"degree") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          ndegree = force->numeric(FLERR,arg[iarg+1]);
+          if (ndegree < 0)
+              error->all(FLERR,"Illegal compute diamondorder/atom command");
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"rsoft") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          rsoft = force->numeric(FLERR,arg[iarg+1]);
+          if (rsoft <= 0)
+              error->all(FLERR,"Illegal compute diamondorder/atom command");
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"nnn") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          if (strcmp(arg[iarg+1],"NULL") == 0) 
+              nnn = 0;
+          else {
+              nnn = force->numeric(FLERR,arg[iarg+1]);
+              if (nnn < 0)
+                  error->all(FLERR,"Illegal compute diamondorder/atom command");
+          }
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"cutoff") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          double cutoff = force->numeric(FLERR,arg[iarg+1]);
+          if (cutoff <= 0.0)
+              error->all(FLERR,"Illegal compute diamondorder/atom command");
+          cutsq = cutoff*cutoff;
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"hydrogen") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          hydrogenId = force->numeric(FLERR,arg[iarg+1]);
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"oxygen") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          oxygenId = force->numeric(FLERR,arg[iarg+1]);
+          iarg += 2;
+      } else if (strcmp(arg[iarg],"deviation") == 0) {
+          if (iarg+2 > narg) error->all(FLERR,"Illegal compute diamondorder/atom command");
+          double deviation = force->numeric(FLERR,arg[iarg+1]);
+          if (deviation < 0.0)
+              error->all(FLERR,"Illegal compute diamondorder/atom command");
+          devSq = deviation*deviation;
+          iarg += 2;
+      } else error->all(FLERR,"Illegal compute diamondorder/atom command");
   }
 
   peratom_flag = 1;
@@ -168,6 +187,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
   int i,j,ii,jj,inum,jnum;
   double xtmp,ytmp,ztmp,delx,dely,delz,rsq;
   int *ilist,*jlist,*numneigh,**firstneigh;
+  int *iH=new int[4];
 
   invoked_peratom = update->ntimestep;
 
@@ -199,6 +219,9 @@ void ComputeDiamondOrderAtom::compute_peratom()
 
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
+    if (oxygenId>=0&&atom->type[i]!=oxygenId) {
+        continue;
+    }
     double *qlm= qlmarray[i];
     if (mask[i] & groupbit) {
       xtmp = x[i][0];
@@ -221,15 +244,29 @@ void ComputeDiamondOrderAtom::compute_peratom()
       // distsq[] = distance sq to each
       // nearest[] = atom indices of neighbors
 
+      iH[0]=atom->map(atom->tag[i]+1);
+      iH[1]=atom->map(atom->tag[i]+2);
+
       int ncount = 0;
       double sWeight=0;
       for (jj = 0; jj < jnum; jj++) {
         j = jlist[jj];
         j &= NEIGHMASK;
+        if (oxygenId>=0&&atom->type[j]!=oxygenId) {
+            continue;
+        }
 
         delx = xtmp - x[j][0];
         dely = ytmp - x[j][1];
         delz = ztmp - x[j][2];
+
+        iH[2]=atom->map(atom->tag[j]+1);
+        iH[3]=atom->map(atom->tag[j]+2);
+
+        if (!hydrogenBond(xtmp,ytmp,ztmp,delx,dely,delz,iH)) {
+            continue;
+        }
+
         rsq = delx*delx + dely*dely + delz*delz;
         if (rsq < cutsq) {
           distsq[ncount] = rsq;
@@ -291,6 +328,9 @@ void ComputeDiamondOrderAtom::compute_peratom()
   }
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
+    if (oxygenId>=0&&atom->type[i]!=oxygenId) {
+        continue;
+    }
     if (mask[i] & groupbit) {
       xtmp = x[i][0];
       ytmp = x[i][1];
@@ -316,6 +356,10 @@ void ComputeDiamondOrderAtom::compute_peratom()
       for (jj = 0; jj < jnum; jj++) {
         j = jlist[jj];
         j &= NEIGHMASK;
+
+        if (oxygenId>=0&&atom->type[j]!=oxygenId) {
+            continue;
+        }
 
         delx = xtmp - x[j][0];
         dely = ytmp - x[j][1];
@@ -362,6 +406,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
       qnvector[i]=usum;
     }
   }
+  delete[] iH;
 }
 
 void ComputeDiamondOrderAtom::add_qlm_complex(int m,double frr,double x,double y,double z,double *u,double *v) {
@@ -528,5 +573,24 @@ double ComputeDiamondOrderAtom::smearing(double r) const {
     else {
         return 1/(1+pow(r/rsoft,8));
     }
+}
+
+inline bool withinDev(double x0,double y0,double z0,double x,double y,double z,double devSq) {
+    double xp=y0*z-z0*y;
+    double yp=z0*x-x0*z;
+    double zp=x0*y-y0*x;
+    return (x0*x0+y0*y0+z0*z0)*devSq>=xp*xp+yp*yp+zp*zp;
+}
+bool ComputeDiamondOrderAtom::hydrogenBond(double x1,double y1,double z1,double x21,double y21,double z21,int *iH) const {
+    if (devSq<0) {
+        return true;
+    }
+    int s=0;
+    int i;
+    for (i=0;i<4;i++) {
+        double *p=atom->x[iH[i]];
+        s+=withinDev(x21,y21,z21,p[0]-x1,p[1]-y1,p[2]-z1,devSq);
+    }
+    return s==1;
 }
 

@@ -253,6 +253,8 @@ LAMMPS::LAMMPS(int narg, char **arg, MPI_Comm communicator)
       helpflag = 1;
       citeflag = 0;
       iarg += 1;
+    } else if (strcmp(arg[iarg],"-ffs") == 0) {
+      iarg+=2;
     } else error->universe_all(FLERR,"Invalid command-line argument");
   }
 

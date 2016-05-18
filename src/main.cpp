@@ -14,6 +14,7 @@
 #include <mpi.h>
 #include "lammps.h"
 #include "input.h"
+#include "cbx_ffs.h"
 #include <stdio.h>
 
 using namespace LAMMPS_NS;
@@ -22,15 +23,25 @@ using namespace LAMMPS_NS;
    main program to drive LAMMPS
 ------------------------------------------------------------------------- */
 
-int main(int argc, char **argv)
+int single_universe(int argc, char **argv)
 {
-  MPI_Init(&argc,&argv);
 
   LAMMPS *lammps = new LAMMPS(argc,argv,MPI_COMM_WORLD);
 
   lammps->input->file();
   delete lammps;
 
-  MPI_Barrier(MPI_COMM_WORLD);
-  MPI_Finalize();
 }
+
+int main(int argc,char **argv) {
+    MPI_Init(&argc,&argv);
+    if (!ffsRequested(argc,argv)) {
+        single_universe(argc,argv);
+    }
+    else {
+        ffs_main(argc,argv);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Finalize();
+}
+

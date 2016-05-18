@@ -40,6 +40,8 @@ class ComputeNucleiAtom : public Compute {
   int *which,*value2index;
   bool *compareDirection;// true for greater than, false for less than
   double *threshold;
+  double hardNeighbourDistance;
+  int hardNeighbourCount;
 
   int nmax,commflag;
   double cutsq;

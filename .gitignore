@@ -12,3 +12,6 @@ log.*
 *.exe
 .*.swp
 *.orig
+
+/examples
+
