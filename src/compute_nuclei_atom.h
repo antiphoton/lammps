@@ -37,7 +37,7 @@ class ComputeNucleiAtom : public Compute {
 
  private:
   int nConditions;
-  int *which,*value2index;
+  int *value2index;
   bool *compareDirection;// true for greater than, false for less than
   double *threshold;
   double hardNeighbourDistance;
@@ -48,6 +48,7 @@ class ComputeNucleiAtom : public Compute {
   class NeighList *list;
   double *nucleiID;
   double *isSolid;
+  void invokePrerequisites() const;
   bool checkSolid(int m) const;
 };
 

@@ -33,6 +33,11 @@ using namespace LAMMPS_NS;
 
 enum{X,V,F,COMPUTE,FIX,VARIABLE};
 
+#define INVOKED_VECTOR 2
+#define INVOKED_ARRAY 4
+#define INVOKED_PERATOM 8
+#define INVOKED_LOCAL 16
+
 /* ---------------------------------------------------------------------- */
 
 ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
@@ -43,7 +48,6 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
   if ((narg-4)%3!=0) error->all(FLERR,"Illegal compute nuclei/atom command");
 
   nConditions=(narg-4)/3;
-  which=new int[nConditions];
   value2index=new int[nConditions];
   compareDirection=new bool[nConditions];
   threshold=new double[nConditions];
@@ -52,27 +56,19 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
   int iCondition=0;
   int iarg = 4;
   while (iarg < narg) {
-    if (strncmp(arg[iarg],"c_",2) == 0 ||
-        strncmp(arg[iarg],"f_",2) == 0 ||
-        strncmp(arg[iarg],"v_",2) == 0) {
-      if (arg[iarg][0] == 'c') {
-          which[iCondition] = COMPUTE;
-          value2index[iCondition]=modify->find_compute(&arg[iarg][2]);
-      //} else if (arg[iarg][0] == 'f') {
-      //    which[iCondition] = FIX;
-      //}
-      //else if (arg[iarg][0] == 'v') {
-      //    which[iCondition] = VARIABLE;
+    if (strncmp(arg[iarg],"c_",2) == 0) {
+      int iCompute=modify->find_compute(&arg[iarg][2]);
+      if (iCompute<0) {
+          error->all(FLERR,"Illegal compute nuclei/atom command");
       }
-      else error->all(FLERR,"Illegal compute diamondorder/atom command");
-
-      if (value2index[iCondition]<0) {
-          error->all(FLERR,"Illegal compute diamondorder/atom command");
+      value2index[iCondition]=iCompute;
+      if (modify->compute[iCompute]->peratom_flag!=1) {
+          error->all(FLERR,"Illegal compute nuclei/atom command");
       }
 
       if (arg[iarg+1][0] == 'g') compareDirection[iCondition] = true;
       else if (arg[iarg+1][0] == 'l') compareDirection[iCondition] = false;
-      else error->all(FLERR,"Illegal compute diamondorder/atom command");
+      else error->all(FLERR,"Illegal compute nuclei/atom command");
 
       threshold[iCondition]=force->numeric(FLERR,arg[iarg+2]);
       iCondition++;
@@ -82,9 +78,14 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
         hardNeighbourDistance=force->numeric(FLERR,arg[iarg+1]);
         hardNeighbourCount=force->numeric(FLERR,arg[iarg+2]);
         iarg+=2;
-    } else error->all(FLERR,"Illegal compute diamondorder/atom command");
+    } else error->all(FLERR,"Illegal compute nuclei/atom command");
     iarg++;
   }
+  
+  if (iCondition<1) {
+      error->all(FLERR,"Illegal compute nuclei/atom command");
+  }
+  nConditions=iCondition;
 
   double cutoff = force->numeric(FLERR,arg[3]);
   cutsq = cutoff*cutoff;
@@ -103,7 +104,6 @@ ComputeNucleiAtom::~ComputeNucleiAtom()
 {
   memory->destroy(isSolid);
   memory->destroy(nucleiID);
-  delete[] which;
   delete[] value2index;
   delete[] compareDirection;
   delete[] threshold;
@@ -154,6 +154,8 @@ void ComputeNucleiAtom::compute_peratom()
   int *ilist,*jlist,*numneigh,**firstneigh;
 
   invoked_peratom = update->ntimestep;
+
+  invokePrerequisites();
 
   // grow nucleiID array if necessary
 
@@ -357,6 +359,17 @@ double ComputeNucleiAtom::memory_usage()
   return bytes;
 }
 
+void ComputeNucleiAtom::invokePrerequisites() const {
+    int m;
+    for (m=0;m<nConditions;m++) {
+        int vidx=value2index[m];
+        Compute *compute=modify->compute[vidx];
+        if (!(compute->invoked_flag & INVOKED_PERATOM)) {
+            compute->compute_peratom();
+            compute->invoked_flag |= INVOKED_PERATOM;
+        }
+    }
+}
 bool ComputeNucleiAtom::checkSolid(int i) const {
     if (hardNeighbourDistance>0) {
         double disSqr=hardNeighbourDistance*hardNeighbourDistance;
@@ -388,19 +401,16 @@ bool ComputeNucleiAtom::checkSolid(int i) const {
     bool ret=true;
     int m;
     for (m=0;m<nConditions;m++) {
-        int wh=which[m];
         int vidx=value2index[m];
         bool cd=compareDirection[m];
         double td=threshold[m];
-        if (wh==COMPUTE) {
-            Compute *compute=modify->compute[vidx];
-            double *comp_vec=compute->vector_atom;
-            if (cd) {
-                ret=ret&&comp_vec[i]>td;
-            }
-            else {
-                ret=ret&&comp_vec[i]<td;
-            }
+        Compute *compute=modify->compute[vidx];
+        double *comp_vec=compute->vector_atom;
+        if (cd) {
+            ret=ret&&comp_vec[i]>td;
+        }
+        else {
+            ret=ret&&comp_vec[i]<td;
         }
         if (ret==false) {
             break;
