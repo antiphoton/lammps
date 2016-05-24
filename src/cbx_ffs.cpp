@@ -5,6 +5,7 @@
 #include<cstdlib>
 #include<ctime>
 #include<map>
+#include<queue>
 #include<string>
 #include"lammps.h"
 #include"library.h"
@@ -114,6 +115,139 @@ public:
 private:
     FILE *f;
 };
+class FfsCountdown {
+public:
+    FfsCountdown(int n) {
+        if (!inited) {
+            initComm();
+            inited=true;
+        }
+        if (local->isLeader) {
+            if (world->isLeader) {
+            }
+            else {
+                std::pair<MPI_Request,int*> p;
+                p.second=new int;
+                *p.second=0;
+                MPI_Irecv(0,0,MPI_INT,world->LEADER,1,commWorld,&p.first);
+                q2.push(p);
+            }
+        }
+        broadcasted=false;
+        remains=n;
+    }
+    ~FfsCountdown() {
+        MPI_Barrier(commWorld);
+        releaseQueue(q1,true);
+        releaseQueue(q2,true);
+    }
+    void done(int n=1) {
+        if (local->isLeader) {
+            if (world->isLeader) {
+                remains-=n;
+                broadcastTermination();
+            }
+            else {
+                std::pair<MPI_Request,int*> p;
+                p.second=new int;
+                *p.second=n;
+                MPI_Isend(p.second,1,MPI_INT,world->LEADER,0,commWorld,&p.first);
+                q1.push(p);
+            }
+        }
+    }
+    bool next() {
+        if (remains<=0) {
+            return false;
+        }
+        if (local->isLeader) {
+            if (world->isLeader) {
+                if (remains>0) {
+                    if (q1.empty()) {
+                        std::pair<MPI_Request,int*> p;
+                        p.second=new int;
+                        *p.second=0;
+                        MPI_Irecv(p.second,1,MPI_INT,MPI_ANY_SOURCE,0,commWorld,&p.first);
+                        q1.push(p);
+                    }
+                    while (!q1.empty()) {
+                        int flag;
+                        MPI_Status status;
+                        releaseQueue(q1,false,&flag,&status);
+                        if (!flag) {
+                            break;
+                        }
+                        remains-=*q1.front().second;
+                        delete q1.front().second;
+                        q1.pop();
+                    }
+                    broadcastTermination();
+                }
+            }
+            else {
+                int flag;
+                MPI_Status status;
+                releaseQueue(q2,false,&flag,&status);
+                if (flag) {
+                    remains=-1;
+                    delete q2.front().second;
+                    q2.pop();
+                }
+            }
+        }
+        MPI_Bcast(&remains,1,MPI_INT,local->LEADER,commLocal);
+        return remains>0;
+    }
+private:
+    static bool inited;
+    static MPI_Comm commWorld,commLocal;
+    static void initComm() {
+        MPI_Comm_dup(world->comm,&commWorld);
+        MPI_Comm_dup(local->comm,&commLocal);
+    };
+    bool broadcasted;
+    void broadcastTermination() {
+        if (!world->isLeader) {
+            return ;
+        }
+        if (remains>0) {
+            return ;
+        }
+        if (broadcasted) {
+            return ;
+        }
+        broadcasted=true;
+        int i;
+        for (i=1;i<world->size;i++) {
+            std::pair<MPI_Request,int*> p;
+            p.second=new int;
+            *p.second=0;
+            MPI_Isend(0,0,MPI_INT,i,1,commWorld,&p.first);
+            q2.push(p);
+        }
+        MPI_Bcast(&remains,1,MPI_INT,local->LEADER,commLocal);
+    };
+    void releaseQueue(std::queue< std::pair<MPI_Request,int*> > &q,bool hard,int *flag=0,MPI_Status *status=0) {
+        while (!q.empty()) {
+            std::pair<MPI_Request,int*> f=q.front();
+            if (f.first!=MPI_REQUEST_NULL) {
+                if (hard) {
+                    MPI_Cancel(&f.first);
+                }
+                else {
+                    MPI_Test(&f.first,flag,status);
+                    break;
+                }
+            }
+            delete f.second;
+            q.pop();
+        }
+    };
+    std::queue< std::pair<MPI_Request,int*> > q1,q2;
+    int remains;
+};
+bool FfsCountdown::inited=false;
+MPI_Comm FfsCountdown::commWorld,FfsCountdown::commLocal;
 bool ffsRequested(int argc, char **argv) {
     int i;
     for (i=0;i<argc;i++) {
@@ -181,10 +315,6 @@ void runBatch(LAMMPS *lammps) {
         lammps_command(lammps,str);
     }
 }
-const int lammps_every_step=20;
-const int target_pool_count=2;
-const int lambda_A=11;
-const int lambda_0=21;
 int ffs_main(int argc, char **argv) {
     createVelocity(0);
     runBatch(0);
@@ -192,15 +322,17 @@ int ffs_main(int argc, char **argv) {
     lammps->input->file();
     FfsFileWriter fileSummary("total_time.dat");
     createVelocity(lammps);
-    int current_pool_found=0;
+    FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
     lammps_command(lammps,(char *)"run 0 pre yes post no");
-    while (current_pool_found<target_pool_count) {
+    while (1) {
         bool ready=false;
         const double *lambdaReuslt;
         while (1) {
             runBatch(lammps);
             lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
             int lambda=(int)lambdaReuslt[0];
+            static int lambda_A=ffsParams->getInt("lambda_A");
+            static int lambda_0=ffsParams->getInt("lambda_0");
             if (lambda<=lambda_A) {
                 ready=true;
             }
@@ -208,13 +340,20 @@ int ffs_main(int argc, char **argv) {
                 ready=false;
                 break;
             }
+            if (!fcd->next()) {
+                break;
+            }
+        }
+        if (!fcd->next()) {
+            delete fcd;
+            break;
         }
         int64_t timestep=lammps->update->ntimestep;
         static char strDump[100];
         sprintf(strDump,"write_dump all custom pool/%lld-%d.lammpstraj id x y z",timestep,local->id);
         fileSummary.write("%d\t%lld\n",local->id,timestep);
         lammps_command(lammps,strDump);
-        current_pool_found++;
+        fcd->done();
     }
     lammps_command(lammps,(char *)"run 0 pre no post yes");
     delete lammps;
