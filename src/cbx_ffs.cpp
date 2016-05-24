@@ -1,3 +1,4 @@
+#include<stdarg.h>
 #include<stdio.h>
 #include<string.h>
 #include<mpi.h>
@@ -83,7 +84,36 @@ private:
     }
 };
 const FfsFileReader *ffsParams;
-
+class FfsFileWriter {
+public:
+    FfsFileWriter(const char *filename) {
+        if (local->isLeader) {
+            static char str[1024];
+            sprintf(str,"%s-%03d",filename,local->id);
+            f=fopen(str,"w");
+        }
+    }
+    ~FfsFileWriter() {
+        if (local->isLeader) {
+            fclose(f);
+        }
+    }
+    int write(const char *format,...) {
+        int ret=0;
+        if (local->isLeader) {
+            static char buffer[1024];
+            va_list args;
+            va_start(args,format);
+            ret=vsprintf(buffer,format,args);
+            va_end(args);
+            printf("%s",buffer);
+            fprintf(f,"%s",buffer);
+        }
+        return ret;
+    }
+private:
+    FILE *f;
+};
 bool ffsRequested(int argc, char **argv) {
     int i;
     for (i=0;i<argc;i++) {
@@ -160,6 +190,7 @@ int ffs_main(int argc, char **argv) {
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
+    FfsFileWriter fileSummary("total_time.dat");
     createVelocity(lammps);
     int current_pool_found=0;
     lammps_command(lammps,(char *)"run 0 pre yes post no");
@@ -181,7 +212,7 @@ int ffs_main(int argc, char **argv) {
         int64_t timestep=lammps->update->ntimestep;
         static char strDump[100];
         sprintf(strDump,"write_dump all custom pool/%lld-%d.lammpstraj id x y z",timestep,local->id);
-        printf("%d\t%lld\n",local->id,timestep);
+        fileSummary.write("%d\t%lld\n",local->id,timestep);
         lammps_command(lammps,strDump);
         current_pool_found++;
     }
