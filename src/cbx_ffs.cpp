@@ -26,7 +26,45 @@ struct MpiInfo {
     };
 };
 const MpiInfo *world,*local;
-struct FfsFileReader {
+class FfsBranch {
+public:
+    FfsBranch() {
+        if (!commInited) {
+            size=world->size/local->size;
+            initComm();
+            commInited=true;
+        }
+    }
+private:
+    static bool commInited;
+    static void initComm() {
+        MPI_Comm_dup(local->comm,&commLocal);
+        MPI_Comm_split(world->comm,local->isLeader?0:MPI_UNDEFINED,world->rank,&commLeader);
+    };
+protected:
+    static void bcast(void *buffer,int count=1,MPI_Datatype datatype=MPI_INT) {
+        if (local->isLeader) {
+            MPI_Bcast(buffer,count,datatype,0,commLeader);
+        }
+        MPI_Bcast(buffer,count,datatype,0,commLocal);
+    }
+    static void barrier() {
+        if (local->isLeader) {
+            MPI_Barrier(commLeader);
+        }
+        MPI_Barrier(commLocal);
+    }
+    static int size;
+    static MPI_Comm commLeader,commLocal;
+    const static int TAG_COUNTDOWN_DONE;
+    const static int TAG_COUNTDOWN_TERMINATE;
+};
+bool FfsBranch::commInited=false;
+MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
+int FfsBranch::size=0;
+const int FfsBranch::TAG_COUNTDOWN_DONE=1;
+const int FfsBranch::TAG_COUNTDOWN_TERMINATE=2;
+struct FfsFileReader: public FfsBranch {
     std::map<std::string,std::string> dict;
     FfsFileReader(const char *filename) {
         if (world->isLeader) {
@@ -62,15 +100,15 @@ struct FfsFileReader {
             }
             fclose(f);
         }
-        MPI_Barrier(world->comm);
+        barrier();
     };
     int getInt(const std::string &name) const {
-        const std::string v=getString(name);
         int y=0;
         if (world->isLeader) {
+            const std::string v=getString(name);
             sscanf(v.c_str(),"%d",&y);
         }
-        MPI_Bcast(&y,1,MPI_INT,world->LEADER,world->comm);
+        bcast(&y,1,MPI_INT);
         return y;
     }
 private:
@@ -85,7 +123,7 @@ private:
     }
 };
 const FfsFileReader *ffsParams;
-class FfsFileWriter {
+class FfsFileWriter: public FfsBranch {
 public:
     FfsFileWriter(const char *filename) {
         if (local->isLeader) {
@@ -115,139 +153,146 @@ public:
 private:
     FILE *f;
 };
-class FfsCountdown {
+class FfsCountdown: public FfsBranch {
 public:
     FfsCountdown(int n) {
-        if (!inited) {
-            initComm();
-            inited=true;
-        }
-        if (local->isLeader) {
-            if (world->isLeader) {
-            }
-            else {
-                std::pair<MPI_Request,int*> p;
-                p.second=new int;
-                *p.second=0;
-                MPI_Irecv(0,0,MPI_INT,world->LEADER,1,commWorld,&p.first);
-                q2.push(p);
-            }
-        }
-        broadcasted=false;
         remains=n;
+        terminated=false;
     }
     ~FfsCountdown() {
-        MPI_Barrier(commWorld);
-        releaseQueue(q1,true);
-        releaseQueue(q2,true);
+        barrier();
     }
     void done(int n=1) {
-        if (local->isLeader) {
-            if (world->isLeader) {
-                remains-=n;
-                broadcastTermination();
-            }
-            else {
-                std::pair<MPI_Request,int*> p;
-                p.second=new int;
-                *p.second=n;
-                MPI_Isend(p.second,1,MPI_INT,world->LEADER,0,commWorld,&p.first);
-                q1.push(p);
-            }
+        if (!local->isLeader) {
+            return ;
+        }
+        if (terminated) {
+            return ;
+        }
+        int x=n;
+        if (world->isLeader) {
+            remains-=x;
+        }
+        else {
+            MPI_Send(&x,1,MPI_INT,0,TAG_COUNTDOWN_DONE,commLeader);
         }
     }
     bool next() {
-        if (remains<=0) {
+        if (terminated) {
             return false;
         }
+        int ret;
         if (local->isLeader) {
             if (world->isLeader) {
-                if (remains>0) {
-                    if (q1.empty()) {
-                        std::pair<MPI_Request,int*> p;
-                        p.second=new int;
-                        *p.second=0;
-                        MPI_Irecv(p.second,1,MPI_INT,MPI_ANY_SOURCE,0,commWorld,&p.first);
-                        q1.push(p);
+                while (1) {
+                    int flag;
+                    MPI_Status status;
+                    MPI_Iprobe(MPI_ANY_SOURCE,TAG_COUNTDOWN_DONE,commLeader,&flag,&status);
+                    if (flag) {
+                        int x;
+                        MPI_Recv(&x,1,MPI_INT,status.MPI_SOURCE,status.MPI_TAG,commLeader,&status);
+                        remains-=x;
                     }
-                    while (!q1.empty()) {
-                        int flag;
-                        MPI_Status status;
-                        releaseQueue(q1,false,&flag,&status);
-                        if (!flag) {
-                            break;
-                        }
-                        remains-=*q1.front().second;
-                        delete q1.front().second;
-                        q1.pop();
+                    else {
+                        break;
                     }
-                    broadcastTermination();
+                }
+                if (remains<=0) {
+                    terminated=true;
+                    int i;
+                    for (i=1;i<size;i++) {
+                        MPI_Send(0,0,MPI_INT,i,TAG_COUNTDOWN_TERMINATE,commLeader);
+                    }
+                    ret=0;
+                }
+                else {
+                    ret=1;
                 }
             }
             else {
                 int flag;
                 MPI_Status status;
-                releaseQueue(q2,false,&flag,&status);
+                MPI_Iprobe(0,TAG_COUNTDOWN_TERMINATE,commLeader,&flag,&status);
                 if (flag) {
-                    remains=-1;
-                    delete q2.front().second;
-                    q2.pop();
-                }
-            }
-        }
-        MPI_Bcast(&remains,1,MPI_INT,local->LEADER,commLocal);
-        return remains>0;
-    }
-private:
-    static bool inited;
-    static MPI_Comm commWorld,commLocal;
-    static void initComm() {
-        MPI_Comm_dup(world->comm,&commWorld);
-        MPI_Comm_dup(local->comm,&commLocal);
-    };
-    bool broadcasted;
-    void broadcastTermination() {
-        if (!world->isLeader) {
-            return ;
-        }
-        if (remains>0) {
-            return ;
-        }
-        if (broadcasted) {
-            return ;
-        }
-        broadcasted=true;
-        int i;
-        for (i=1;i<world->size;i++) {
-            std::pair<MPI_Request,int*> p;
-            p.second=new int;
-            *p.second=0;
-            MPI_Isend(0,0,MPI_INT,i,1,commWorld,&p.first);
-            q2.push(p);
-        }
-        MPI_Bcast(&remains,1,MPI_INT,local->LEADER,commLocal);
-    };
-    void releaseQueue(std::queue< std::pair<MPI_Request,int*> > &q,bool hard,int *flag=0,MPI_Status *status=0) {
-        while (!q.empty()) {
-            std::pair<MPI_Request,int*> f=q.front();
-            if (f.first!=MPI_REQUEST_NULL) {
-                if (hard) {
-                    MPI_Cancel(&f.first);
+                    terminated=true;
+                    MPI_Recv(0,0,MPI_INT,0,TAG_COUNTDOWN_TERMINATE,commLeader,&status);
+                    ret=0;
                 }
                 else {
-                    MPI_Test(&f.first,flag,status);
-                    break;
+                    ret=1;
                 }
             }
-            delete f.second;
-            q.pop();
         }
-    };
-    std::queue< std::pair<MPI_Request,int*> > q1,q2;
+        MPI_Bcast(&ret,1,MPI_INT,0,commLocal);
+        return ret;
+    }
+private:
+    bool terminated;
     int remains;
 };
-bool FfsCountdown::inited=false;
-MPI_Comm FfsCountdown::commWorld,FfsCountdown::commLocal;
+class FfsFileTree: public FfsBranch {
+public:
+    FfsFileTree(int layer):layer(layer) {
+        a=new int[size];
+        b=new int[size];
+        int i;
+        for (i=0;i<size;i++) {
+            a[i]=0;
+            b[i]=0;
+        }
+    }
+    ~FfsFileTree() {
+        delete[] b;
+        delete[] a;
+    }
+    const std::string add() {
+        int x;
+        if (local->isLeader) {
+            x=a[local->id];
+            a[local->id]++;
+        }
+        MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+        return generateName(x);
+    }
+    void commit() {
+        MPI_Allreduce(a,b,size,MPI_INT,MPI_SUM,commLeader);
+        total=0;
+        if (local->isLeader) {
+            for (int i=0;i<size;i++) {
+                total+=b[i];
+            }
+        }
+        MPI_Bcast(&total,1,MPI_INT,0,commLocal);
+    }
+    const std::string get() const {
+        int x;
+        if (local->isLeader) {
+            x=std::rand()%total;
+        }
+        MPI_Bcast(&x,1,MPI_INT,local->LEADER,commLocal);
+        int i;
+        for (i=0;i<size;i++) {
+            if (x<b[i]) {
+                return generateName(x,i);
+            }
+            else {
+                x-=b[i];
+            }
+        }
+    }
+private:
+    int layer;
+    int *a,*b;
+    int total;
+    const std::string generateName(int x, int branchId=-1) const {
+        if (branchId==-1) {
+            branchId=local->id;
+        }
+        static char c[100];
+        sprintf(c,"%d__%d_%d",layer,branchId,x);
+        return c;
+    }
+};
 bool ffsRequested(int argc, char **argv) {
     int i;
     for (i=0;i<argc;i++) {
@@ -321,41 +366,90 @@ int ffs_main(int argc, char **argv) {
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
     FfsFileWriter fileSummary("total_time.dat");
-    createVelocity(lammps);
-    FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
-    lammps_command(lammps,(char *)"run 0 pre yes post no");
-    while (1) {
-        bool ready=false;
-        const double *lambdaReuslt;
+    static int lambda_A=ffsParams->getInt("lambda_A");
+    FfsFileTree *lastTree,*currentTree;
+    if (1) {
+        createVelocity(lammps);
+        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
+        lammps_command(lammps,(char *)"run 0 pre yes post no");
+        lastTree=0;
+        currentTree=new FfsFileTree(0);
         while (1) {
-            runBatch(lammps);
-            lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
-            int lambda=(int)lambdaReuslt[0];
-            static int lambda_A=ffsParams->getInt("lambda_A");
-            static int lambda_0=ffsParams->getInt("lambda_0");
-            if (lambda<=lambda_A) {
-                ready=true;
-            }
-            if (ready&&lambda>=lambda_0) {
-                ready=false;
-                break;
+            bool ready=false;
+            const double *lambdaReuslt;
+            while (1) {
+                runBatch(lammps);
+                lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
+                int lambda=(int)lambdaReuslt[0];
+                static int lambda_0=ffsParams->getInt("lambda_0");
+                if (lambda<=lambda_A) {
+                    ready=true;
+                }
+                if (ready&&lambda>=lambda_0) {
+                    ready=false;
+                    break;
+                }
+                if (!fcd->next()) {
+                    break;
+                }
             }
             if (!fcd->next()) {
+                delete fcd;
                 break;
             }
+            int64_t timestep=lammps->update->ntimestep;
+            static char strDump[100];
+            sprintf(strDump,"write_dump all xyz pool/xyz.%s",currentTree->add().c_str());
+            fileSummary.write("%d\t%lld\n",local->id,timestep);
+            lammps_command(lammps,strDump);
+            fcd->done();
         }
-        if (!fcd->next()) {
-            delete fcd;
-            break;
-        }
-        int64_t timestep=lammps->update->ntimestep;
-        static char strDump[100];
-        sprintf(strDump,"write_dump all custom pool/%lld-%d.lammpstraj id x y z",timestep,local->id);
-        fileSummary.write("%d\t%lld\n",local->id,timestep);
-        lammps_command(lammps,strDump);
-        fcd->done();
+        lammps_command(lammps,(char *)"run 0 pre no post yes");
     }
-    lammps_command(lammps,(char *)"run 0 pre no post yes");
+    const int n=5;
+    int lambda[n]={11,19,22,25,28};
+    for (int i=1;i+1<n;i++) {
+        delete lastTree;
+        lastTree=currentTree;
+        currentTree=new FfsFileTree(i);
+        lastTree->commit();
+        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
+        while (1) {
+            static char strReadData[100];
+            sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",lastTree->get().c_str());
+            lammps_command(lammps,strReadData);
+            createVelocity(lammps);
+            lammps_command(lammps,(char *)"run 0 pre yes post no");
+            int lambda_calc,lambda_next=lambda[i+1];
+            while (1) {
+                runBatch(lammps);
+                const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
+                lambda_calc=(int)lambdaReuslt[0];
+                if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
+                    break;
+                }
+                if (!fcd->next()) {
+                    break;
+                }
+            }
+            if (!fcd->next()) {
+                delete fcd;
+                break;
+            }
+            int64_t timestep=lammps->update->ntimestep;
+            lammps_command(lammps,(char *)"run 0 pre no post yes");
+            if (lambda_calc<=lambda_A) {
+                continue;
+            }
+            if (lambda_calc>=lambda_next) {
+                static char strDump[100];
+                sprintf(strDump,"write_dump all xyz pool/xyz.%s",currentTree->add().c_str());
+                lammps_command(lammps,strDump);
+                fcd->done();
+                continue;
+            }
+        }
+    }
     delete lammps;
     delete local;
     delete world;
