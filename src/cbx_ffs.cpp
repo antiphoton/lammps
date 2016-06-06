@@ -56,14 +56,13 @@ protected:
     }
     static int size;
     static MPI_Comm commLeader,commLocal;
-    const static int TAG_COUNTDOWN_DONE;
-    const static int TAG_COUNTDOWN_TERMINATE;
+    static const int TAG_COUNTDOWN_DONE=1;
+    static const int TAG_COUNTDOWN_TERMINATE=2;
+    static const int TAG_FILEWRITER_LINE=3;
 };
 bool FfsBranch::commInited=false;
 MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
 int FfsBranch::size=0;
-const int FfsBranch::TAG_COUNTDOWN_DONE=1;
-const int FfsBranch::TAG_COUNTDOWN_TERMINATE=2;
 struct FfsFileReader: public FfsBranch {
     std::map<std::string,std::string> dict;
     FfsFileReader(const char *filename) {
@@ -126,32 +125,66 @@ const FfsFileReader *ffsParams;
 class FfsFileWriter: public FfsBranch {
 public:
     FfsFileWriter(const char *filename) {
-        if (local->isLeader) {
-            static char str[1024];
-            sprintf(str,"%s-%03d",filename,local->id);
-            f=fopen(str,"w");
+        if (world->isLeader) {
+            f=fopen(filename,"w");
         }
     }
     ~FfsFileWriter() {
-        if (local->isLeader) {
+        check();
+        if (world->isLeader) {
             fclose(f);
         }
     }
-    int write(const char *format,...) {
-        int ret=0;
-        if (local->isLeader) {
-            static char buffer[1024];
-            va_list args;
-            va_start(args,format);
-            ret=vsprintf(buffer,format,args);
-            va_end(args);
-            printf("%s",buffer);
-            fprintf(f,"%s",buffer);
+    void writeln(const char *format,...) {
+        if (!local->isLeader) {
+            return ;
         }
-        return ret;
+        static char buffer[MAX_LENGTH+1];
+        va_list args;
+        va_start(args,format);
+        vsprintf(buffer,format,args);
+        va_end(args);
+        putstr(buffer);
+    }
+    void check() {
+        if (!world->isLeader) {
+            return ;
+        }
+        static char buffer[MAX_LENGTH];
+        while (1) {
+            int flag;
+            MPI_Status status;
+            MPI_Iprobe(MPI_ANY_SOURCE,TAG_FILEWRITER_LINE,commLeader,&flag,&status);
+            if (flag) {
+                int l;
+                MPI_Get_count(&status,MPI_CHAR,&l);
+                MPI_Recv(buffer,l,MPI_CHAR,status.MPI_SOURCE,status.MPI_TAG,commLeader,&status);
+                putstr0(status.MPI_SOURCE,buffer);
+            }
+            else {
+                break;
+            }
+        }
     }
 private:
     FILE *f;
+    void putstr(char *s) {
+        s[MAX_LENGTH-1]='\0';
+        if (world->isLeader) {
+            putstr0(0,s);
+        }
+        else {
+            int l=strlen(s);
+            MPI_Send(s,l+1,MPI_CHAR,0,TAG_FILEWRITER_LINE,commLeader);
+        }
+    }
+    void putstr0(int sender,const char *s) {
+        static char buffer[MAX_LENGTH];
+        sprintf(buffer,"%4d    %s",sender,s);
+        fprintf(f,"%s\n",buffer);
+        printf("%s\n",buffer);
+    }
+    static const int MAX_LENGTH=100;
 };
 class FfsCountdown: public FfsBranch {
 public:
@@ -365,7 +398,7 @@ int ffs_main(int argc, char **argv) {
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
-    FfsFileWriter fileSummary("total_time.dat");
+    FfsFileWriter fileSummary("output_list.txt");
     static int lambda_A=ffsParams->getInt("lambda_A");
     FfsFileTree *lastTree,*currentTree;
     if (1) {
@@ -376,11 +409,11 @@ int ffs_main(int argc, char **argv) {
         currentTree=new FfsFileTree(0);
         while (1) {
             bool ready=false;
-            const double *lambdaReuslt;
+            int lambda;
             while (1) {
                 runBatch(lammps);
-                lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
-                int lambda=(int)lambdaReuslt[0];
+                const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
+                lambda=(int)lambdaReuslt[0];
                 static int lambda_0=ffsParams->getInt("lambda_0");
                 if (lambda<=lambda_A) {
                     ready=true;
@@ -389,6 +422,7 @@ int ffs_main(int argc, char **argv) {
                     ready=false;
                     break;
                 }
+                fileSummary.check();
                 if (!fcd->next()) {
                     break;
                 }
@@ -399,8 +433,9 @@ int ffs_main(int argc, char **argv) {
             }
             int64_t timestep=lammps->update->ntimestep;
             static char strDump[100];
-            sprintf(strDump,"write_dump all xyz pool/xyz.%s",currentTree->add().c_str());
-            fileSummary.write("%d\t%lld\n",local->id,timestep);
+            const std::string xyzName=currentTree->add();
+            sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzName.c_str());
+            fileSummary.writeln("%lld\t%d\txyz.%s",timestep,lambda,xyzName.c_str());
             lammps_command(lammps,strDump);
             fcd->done();
         }
