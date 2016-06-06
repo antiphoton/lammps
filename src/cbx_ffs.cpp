@@ -35,6 +35,8 @@ public:
             commInited=true;
         }
     }
+    ~FfsBranch() {
+    }
 private:
     static bool commInited;
     static void initComm() {
@@ -42,18 +44,6 @@ private:
         MPI_Comm_split(world->comm,local->isLeader?0:MPI_UNDEFINED,world->rank,&commLeader);
     };
 protected:
-    static void bcast(void *buffer,int count=1,MPI_Datatype datatype=MPI_INT) {
-        if (local->isLeader) {
-            MPI_Bcast(buffer,count,datatype,0,commLeader);
-        }
-        MPI_Bcast(buffer,count,datatype,0,commLocal);
-    }
-    static void barrier() {
-        if (local->isLeader) {
-            MPI_Barrier(commLeader);
-        }
-        MPI_Barrier(commLocal);
-    }
     static int size;
     static MPI_Comm commLeader,commLocal;
     static const int TAG_COUNTDOWN_DONE=1;
@@ -99,7 +89,6 @@ struct FfsFileReader: public FfsBranch {
             }
             fclose(f);
         }
-        barrier();
     };
     int getInt(const std::string &name) const {
         int y=0;
@@ -107,7 +96,10 @@ struct FfsFileReader: public FfsBranch {
             const std::string v=getString(name);
             sscanf(v.c_str(),"%d",&y);
         }
-        bcast(&y,1,MPI_INT);
+        if (local->isLeader) {
+            MPI_Bcast(&y,1,MPI_INT,0,commLeader);
+        }
+        MPI_Bcast(&y,1,MPI_INT,0,commLocal);
         return y;
     }
 private:
@@ -193,7 +185,6 @@ public:
         terminated=false;
     }
     ~FfsCountdown() {
-        barrier();
     }
     void done(int n=1) {
         if (!local->isLeader) {
@@ -354,32 +345,32 @@ bool ffsRequested(int argc, char **argv) {
     }
     return false;
 }
-int createSharedRandomSeed() {
-    MPI_Barrier(local->comm);
-    int x;
-    if (local->isLeader) {
-        static bool inited=false;
-        if (!inited) {
+class FfsRandomGenerator: public FfsBranch {
+    public:
+        FfsRandomGenerator() {
+            if (!local->isLeader) {
+                return ;
+            }
             std::srand(std::time(0)+world->rank);
-            inited=true;
+            std::rand();
+            std::rand();
         }
-        x=std::rand();
-    }
-    MPI_Bcast(&x,1,MPI_INT,local->LEADER,local->comm);
-    return x;
-}
-void createVelocity(LAMMPS *lammps) {
+        int get() {
+            int x;
+            if (local->isLeader) {
+                x=std::rand();
+            }
+            MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+            return x;
+        }
+};
+
+int createVelocity(LAMMPS *lammps,int temp,FfsRandomGenerator *pRng) {
     static char str[100];
-    static bool inited=false;
-    if (!inited) {
-        int temperatureMean=ffsParams->getInt("temperature");
-        int velocitySeed=createSharedRandomSeed();
-        sprintf(str,"velocity all create %d %d",temperatureMean,velocitySeed);
-        inited=true;
-    }
-    if (lammps) {
-        lammps_command(lammps,str);
-    }
+    int seed=pRng->get();
+    sprintf(str,"velocity all create %d %d",temp,seed);
+    lammps_command(lammps,str);
+    return seed;
 };
 void runBatch(LAMMPS *lammps) {
     static char str[100];
@@ -394,15 +385,16 @@ void runBatch(LAMMPS *lammps) {
     }
 }
 int ffs_main(int argc, char **argv) {
-    createVelocity(0);
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
     FfsFileWriter fileSummary("output_list.txt");
+    int temperatureMean=ffsParams->getInt("temperature");
     static int lambda_A=ffsParams->getInt("lambda_A");
+    FfsRandomGenerator rng;
     FfsFileTree *lastTree,*currentTree;
     if (1) {
-        createVelocity(lammps);
+        int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
         lammps_command(lammps,(char *)"run 0 pre yes post no");
         lastTree=0;
@@ -433,9 +425,9 @@ int ffs_main(int argc, char **argv) {
             }
             int64_t timestep=lammps->update->ntimestep;
             static char strDump[100];
-            const std::string xyzName=currentTree->add();
-            sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzName.c_str());
-            fileSummary.writeln("%lld\t%d\txyz.%s",timestep,lambda,xyzName.c_str());
+            const std::string xyzFinal=currentTree->add();
+            sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
+            fileSummary.writeln("%lld\t%d\t_\t%d\txyz.%s",timestep,lambda,velocitySeed,xyzFinal.c_str());
             lammps_command(lammps,strDump);
             fcd->done();
         }
@@ -451,9 +443,10 @@ int ffs_main(int argc, char **argv) {
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
         while (1) {
             static char strReadData[100];
-            sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",lastTree->get().c_str());
+            const std::string xyzInit=lastTree->get();
+            sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",xyzInit.c_str());
             lammps_command(lammps,strReadData);
-            createVelocity(lammps);
+            int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
             lammps_command(lammps,(char *)"run 0 pre yes post no");
             int lambda_calc,lambda_next=lambda[i+1];
             while (1) {
@@ -463,6 +456,7 @@ int ffs_main(int argc, char **argv) {
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
                 }
+                fileSummary.check();
                 if (!fcd->next()) {
                     break;
                 }
@@ -478,7 +472,9 @@ int ffs_main(int argc, char **argv) {
             }
             if (lambda_calc>=lambda_next) {
                 static char strDump[100];
-                sprintf(strDump,"write_dump all xyz pool/xyz.%s",currentTree->add().c_str());
+                const std::string xyzFinal=currentTree->add();
+                sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
+                fileSummary.writeln("%lld\t%d\txyz.%s\t%d\txyz.%s",timestep,lambda_calc,xyzInit.c_str(),velocitySeed,xyzFinal.c_str());
                 lammps_command(lammps,strDump);
                 fcd->done();
                 continue;
