@@ -248,6 +248,9 @@ public:
             }
         }
         MPI_Bcast(&ret,1,MPI_INT,0,commLocal);
+        if (ret==0) {
+            terminated=true;
+        }
         return ret;
     }
 private:
@@ -279,21 +282,17 @@ public:
         return generateName(x);
     }
     void commit() {
-        MPI_Allreduce(a,b,size,MPI_INT,MPI_SUM,commLeader);
+        if (local->isLeader) {
+            MPI_Allreduce(a,b,size,MPI_INT,MPI_SUM,commLeader);
+        }
+        MPI_Bcast(b,size,MPI_INT,0,commLocal);
         total=0;
-        if (local->isLeader) {
-            for (int i=0;i<size;i++) {
-                total+=b[i];
-            }
+        for (int i=0;i<size;i++) {
+            total+=b[i];
         }
-        MPI_Bcast(&total,1,MPI_INT,0,commLocal);
     }
-    const std::string get() const {
-        int x;
-        if (local->isLeader) {
-            x=std::rand()%total;
-        }
-        MPI_Bcast(&x,1,MPI_INT,local->LEADER,commLocal);
+    const std::string get(int x) const {
+        x%=total;
         int i;
         for (i=0;i<size;i++) {
             if (x<b[i]) {
@@ -443,7 +442,7 @@ int ffs_main(int argc, char **argv) {
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
         while (1) {
             static char strReadData[100];
-            const std::string xyzInit=lastTree->get();
+            const std::string xyzInit=lastTree->get(rng.get());
             sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",xyzInit.c_str());
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
