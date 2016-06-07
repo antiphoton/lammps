@@ -49,6 +49,7 @@ protected:
     static const int TAG_COUNTDOWN_DONE=1;
     static const int TAG_COUNTDOWN_TERMINATE=2;
     static const int TAG_FILEWRITER_LINE=3;
+    static const int TAG_FILEREADER=5;
 };
 bool FfsBranch::commInited=false;
 MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
@@ -175,30 +176,116 @@ private:
         sprintf(buffer,"%4d    %s",sender,s);
         fprintf(f,"%s\n",buffer);
         printf("%s\n",buffer);
+        fflush(f);
     }
     static const int MAX_LENGTH=100;
 };
 class FfsTrajectoryWriter: public FfsFileWriter {
 public:
-    FfsTrajectoryWriter():FfsFileWriter("trajectory.txt") {
+    FfsTrajectoryWriter():FfsFileWriter("trajectory.out.txt") {
     }
     void check() {
         FfsFileWriter::check();
     }
     void writeln(const char *xyzInit,int lambdaInit,int velocitySeed,int64_t timestep,const char *xyzFinal,int lambdaFinal) {
         if (xyzInit==0) {
-            FfsFileWriter::writeln("    (          )  >==%010d %20lld==>  %3d (xyz.%s)",velocitySeed,timestep,lambdaFinal,xyzFinal);
+            FfsFileWriter::writeln("___ (__________)  >==%010d %20lld==>  %3d (xyz.%s)",velocitySeed,timestep,lambdaFinal,xyzFinal);
         }
         else {
             FfsFileWriter::writeln("%3d (xyz.%s)  >==%010d %20lld==>  %3d (xyz.%s)",lambdaInit,xyzInit,velocitySeed,timestep,lambdaFinal,xyzFinal);
         }
     }
 };
+class FfsTrajectoryReader: FfsBranch {
+public:
+    FfsTrajectoryReader() {
+        int n;
+        int *p;
+        if (world->isLeader) {
+            std::vector< std::vector<int> > v;
+            v.resize(size);
+            FILE *f=fopen("trajectory.in.txt","r");
+            while (1) {
+                int lambda,layer,branch,count;
+                int ret=fscanf(f,"%*s%*s%*s%*s%*s%d%*[^.]%*c%d%*c%*c%d%*c%d%*[^\n]%*c",&lambda,&layer,&branch,&count);
+                if (ret==EOF) {
+                    break;
+                }
+                v[branch].push_back(layer);
+                v[branch].push_back(count);
+                v[branch].push_back(lambda);
+            }
+            fclose(f);
+            int i,j;
+            if (1) {
+                const std::vector<int> vv=v[0];
+                n=vv.size();
+                p=new int[n];
+                std::copy(vv.begin(),vv.end(),p);
+            }
+            for (int i=1;i<(int)v.size();i++) {
+                const std::vector<int> &vv=v[i];
+                int nn=vv.size();
+                int *pp=new int[nn];
+                for (j=0;j<nn;j++) {
+                    pp[j]=vv[j];
+                }
+                MPI_Send(pp,nn,MPI_INT,i,TAG_FILEREADER,commLeader);
+                delete[] pp;
+            }
+        }
+        else if (local->isLeader) {
+            MPI_Status status;
+            MPI_Probe(0,TAG_FILEREADER,commLeader,&status);
+            MPI_Get_count(&status,MPI_INT,&n);
+            p=new int[n];
+            MPI_Recv(p,n,MPI_INT,0,TAG_FILEREADER,commLeader,&status);
+        }
+        if (local->isLeader) {
+            int i;
+            for (i=0;i+2<n;i+=3) {
+                int layer=p[i];
+                int count=p[i+1];
+                int lambda=p[i+2];
+                if (layer+1>lambdaLocal.size()) {
+                    lambdaLocal.resize(layer+1);
+                }
+                std::vector<int> &v=lambdaLocal[layer];
+                if (count+1>v.size()) {
+                    v.resize(count+1);
+                }
+                v[count]=lambda;
+            }
+            delete[] p;
+        }
+        MPI_Barrier(commLeader);
+    }
+    const std::vector<int> &get(int layer) const {
+        if (layer<lambdaLocal.size()) {
+            return lambdaLocal[layer];
+        }
+        else {
+            return emptyVector;
+        }
+    }
+    int countPrecalculated(int layer) const {
+        int x;
+        if (local->isLeader) {
+            int t=get(layer).size();
+            MPI_Allreduce(&t,&x,1,MPI_INT,MPI_SUM,commLeader);
+        }
+        MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+        return x;
+    }
+private:
+    std::vector< std::vector<int> > lambdaLocal;
+    std::vector<int> emptyVector;
+};
 class FfsCountdown: public FfsBranch {
 public:
     FfsCountdown(int n) {
         remains=n;
-        terminated=false;
+        terminated=n<=0;
     }
     ~FfsCountdown() {
     }
@@ -275,13 +362,17 @@ private:
 };
 class FfsFileTree: public FfsBranch {
 public:
-    FfsFileTree(int layer):layer(layer) {
+    FfsFileTree(const FfsTrajectoryReader *ftr,int layer):layer(layer) {
         a=new int[size];
         b=new int[size];
         int i;
         for (i=0;i<size;i++) {
             a[i]=0;
             b[i]=0;
+        }
+        if (local->isLeader) {
+            lambdaLocal=ftr->get(layer);
+            a[local->id]=lambdaLocal.size();
         }
     }
     ~FfsFileTree() {
@@ -440,6 +531,7 @@ int ffs_main(int argc, char **argv) {
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
+    FfsTrajectoryReader continuedTrajectory;
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
     static int lambda_A=ffsParams->getInt("lambda_A");
@@ -447,10 +539,10 @@ int ffs_main(int argc, char **argv) {
     FfsFileTree *lastTree,*currentTree;
     if (1) {
         int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
-        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
+        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(0));
         lammps_command(lammps,(char *)"run 0 pre yes post no");
         lastTree=0;
-        currentTree=new FfsFileTree(0);
+        currentTree=new FfsFileTree(&continuedTrajectory,0);
         while (1) {
             bool ready=false;
             int lambda;
@@ -486,13 +578,13 @@ int ffs_main(int argc, char **argv) {
         lammps_command(lammps,(char *)"run 0 pre no post yes");
     }
     const int n=5;
-    int lambda[n]={11,19,22,25,28};
+    int lambda[n]={11,20,25,30,35};
     for (int i=1;i+1<n;i++) {
         delete lastTree;
         lastTree=currentTree;
-        currentTree=new FfsFileTree(i);
+        currentTree=new FfsFileTree(&continuedTrajectory,i);
         lastTree->commit();
-        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
+        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(i));
         while (1) {
             static char strReadData[100];
             const int initConfig=rng.get();
