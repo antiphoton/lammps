@@ -130,6 +130,8 @@ struct FfsFileReader: public FfsBranch {
             MPI_Get_count(&status,MPI_INT,&n);
             p=new int[n];
             MPI_Recv(p,n,MPI_INT,0,TAG_FILE_VECTOR,commLeader,&status);
+        }
+        if (local->isLeader) {
             for (int i=1;i<local->size;i++) {
                 MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLocal);
             }
@@ -139,7 +141,7 @@ struct FfsFileReader: public FfsBranch {
             MPI_Probe(0,TAG_FILE_VECTOR,commLocal,&status);
             MPI_Get_count(&status,MPI_INT,&n);
             p=new int[n];
-            MPI_Recv(p,n,MPI_INT,0,TAG_FILEREADER,commLocal,&status);
+            MPI_Recv(p,n,MPI_INT,0,TAG_FILE_VECTOR,commLocal,&status);
         }
         if (!world->isLeader) {
             for (int i=0;i<n;i++) {
@@ -304,7 +306,7 @@ public:
             }
             delete[] p;
         }
-        MPI_Barrier(commLeader);
+        MPI_Barrier(commLocal);
     }
     const std::vector<int> &get(int layer) const {
         if (layer<lambdaLocal.size()) {
