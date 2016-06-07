@@ -52,6 +52,7 @@ protected:
     static const int TAG_FILEREADER=5;
     static const int TAG_STATS_FLUSH=6;
     static const int TAG_STATS_DATA=7;
+    static const int TAG_FILE_VECTOR=8;
 };
 bool FfsBranch::commInited=false;
 MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
@@ -83,10 +84,7 @@ struct FfsFileReader: public FfsBranch {
                 if (begin2==std::string::npos) {
                     continue;
                 }
-                int end2=sLine.find_first_of(SPACE,begin2);
-                if (end2==std::string::npos) {
-                    end2=sLine.length();
-                }
+                int end2=sLine.find_last_not_of(SPACE)+1;
                 std::string value=sLine.substr(begin2,end2-begin2);
                 dict[key]=value;
             }
@@ -104,6 +102,52 @@ struct FfsFileReader: public FfsBranch {
         }
         MPI_Bcast(&y,1,MPI_INT,0,commLocal);
         return y;
+    }
+    std::vector<int> getVector(const std::string &name) const {
+        std::vector<int> v;
+        if (world->isLeader) {
+            const std::string s=getString(name);
+            const char *p=s.c_str();
+            int x;
+            int n;
+            while (sscanf(p,"%d%n",&x,&n)>0) {
+                v.push_back(x);
+                p+=n;
+            }
+        }
+        int n;
+        int *p;
+        if (world->isLeader) {
+            n=v.size();
+            p=new int[n];
+            for (int i=1;i<size;i++) {
+                MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLeader);
+            }
+        }
+        else if (local->isLeader) {
+            MPI_Status status;
+            MPI_Probe(0,TAG_FILE_VECTOR,commLeader,&status);
+            MPI_Get_count(&status,MPI_INT,&n);
+            p=new int[n];
+            MPI_Recv(p,n,MPI_INT,0,TAG_FILE_VECTOR,commLeader,&status);
+            for (int i=1;i<local->size;i++) {
+                MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLocal);
+            }
+        }
+        else {
+            MPI_Status status;
+            MPI_Probe(0,TAG_FILE_VECTOR,commLocal,&status);
+            MPI_Get_count(&status,MPI_INT,&n);
+            p=new int[n];
+            MPI_Recv(p,n,MPI_INT,0,TAG_FILEREADER,commLocal,&status);
+        }
+        if (!world->isLeader) {
+            for (int i=0;i<n;i++) {
+                v.push_back(p[i]);
+            }
+        }
+        delete[] p;
+        return v;
     }
 private:
     const std::string getString(const std::string &name) const {
@@ -640,6 +684,7 @@ int ffs_main(int argc, char **argv) {
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
     static int lambda_A=ffsParams->getInt("lambda_A");
+    const std::vector<int> lambdaList=ffsParams->getVector("lambda");
     FfsRandomGenerator rng;
     FfsFileTree *lastTree,*currentTree;
     if (1) {
@@ -684,7 +729,6 @@ int ffs_main(int argc, char **argv) {
     }
     FfsShootingStats fss;
     const int n=5;
-    int lambda[n]={11,20,25,30,35};
     for (int i=1;i+1<n;i++) {
         delete lastTree;
         lastTree=currentTree;
@@ -701,7 +745,7 @@ int ffs_main(int argc, char **argv) {
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
             lammps_command(lammps,(char *)"run 0 pre yes post no");
-            int lambda_calc,lambda_next=lambda[i+1];
+            int lambda_calc,lambda_next=lambdaList[i+1];
             while (1) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
