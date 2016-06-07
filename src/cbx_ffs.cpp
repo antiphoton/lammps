@@ -115,7 +115,7 @@ private:
 };
 const FfsFileReader *ffsParams;
 class FfsFileWriter: public FfsBranch {
-public:
+protected:
     FfsFileWriter(const char *filename) {
         if (world->isLeader) {
             f=fopen(filename,"w");
@@ -177,6 +177,22 @@ private:
         printf("%s\n",buffer);
     }
     static const int MAX_LENGTH=100;
+};
+class FfsTrajectoryWriter: public FfsFileWriter {
+public:
+    FfsTrajectoryWriter():FfsFileWriter("trajectory.txt") {
+    }
+    void check() {
+        FfsFileWriter::check();
+    }
+    void writeln(const char *xyzInit,int lambdaInit,int velocitySeed,int64_t timestep,const char *xyzFinal,int lambdaFinal) {
+        if (xyzInit==0) {
+            FfsFileWriter::writeln("    (          )  >==%010d %20lld==>  %3d (xyz.%s)",velocitySeed,timestep,lambdaFinal,xyzFinal);
+        }
+        else {
+            FfsFileWriter::writeln("%3d (xyz.%s)  >==%010d %20lld==>  %3d (xyz.%s)",lambdaInit,xyzInit,velocitySeed,timestep,lambdaFinal,xyzFinal);
+        }
+    }
 };
 class FfsCountdown: public FfsBranch {
 public:
@@ -387,7 +403,7 @@ int ffs_main(int argc, char **argv) {
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
     lammps->input->file();
-    FfsFileWriter fileSummary("output_list.txt");
+    FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
     static int lambda_A=ffsParams->getInt("lambda_A");
     FfsRandomGenerator rng;
@@ -413,7 +429,7 @@ int ffs_main(int argc, char **argv) {
                     ready=false;
                     break;
                 }
-                fileSummary.check();
+                fileTrajectory.check();
                 if (!fcd->next()) {
                     break;
                 }
@@ -426,7 +442,7 @@ int ffs_main(int argc, char **argv) {
             static char strDump[100];
             const std::string xyzFinal=currentTree->add();
             sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
-            fileSummary.writeln("%lld\t%d\t_\t%d\txyz.%s",timestep,lambda,velocitySeed,xyzFinal.c_str());
+            fileTrajectory.writeln((const char *)0,0,velocitySeed,timestep,xyzFinal.c_str(),lambda);
             lammps_command(lammps,strDump);
             fcd->done();
         }
@@ -455,7 +471,7 @@ int ffs_main(int argc, char **argv) {
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
                 }
-                fileSummary.check();
+                fileTrajectory.check();
                 if (!fcd->next()) {
                     break;
                 }
@@ -473,7 +489,7 @@ int ffs_main(int argc, char **argv) {
                 static char strDump[100];
                 const std::string xyzFinal=currentTree->add();
                 sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
-                fileSummary.writeln("%lld\t%d\txyz.%s\t%d\txyz.%s",timestep,lambda_calc,xyzInit.c_str(),velocitySeed,xyzFinal.c_str());
+                fileTrajectory.writeln(xyzInit.c_str(),-1,velocitySeed,timestep,xyzFinal.c_str(),lambda_calc);
                 lammps_command(lammps,strDump);
                 fcd->done();
                 continue;
