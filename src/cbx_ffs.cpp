@@ -504,9 +504,9 @@ public:
                 FILE *f=fopen(fileName[currentPointer],"w");
                 currentPointer=(currentPointer+1)%2;
                 for (i=0;i<n;i++) {
-                    int success=y[i];
-                    int total=y[i]+y[i+1];
-                    fprintf(f,"xyz.%s  :    %d / %d\n",fft->getName(i).c_str(),success,total);
+                    int success=y[i*2];
+                    int total=y[i*2]+y[i*2+1];
+                    fprintf(f,"%d (xyz.%s)  :    %d / %d\n",fft->getLambda(i),fft->getName(i).c_str(),success,total);
                 }
                 fclose(f);
                 delete[] y;
@@ -545,10 +545,10 @@ private:
             MPI_Reduce(p,y,n*2,MPI_INT,MPI_SUM,0,commLeader);
             if (world->isLeader) {
                 int i;
-                for (i=0;i<n;i+=2) {
-                    int success=y[i];
-                    int total=y[i]+y[i+1];
-                    FfsFileWriter::writeln("xyz.%s  :    %d / %d",fft->getName(i).c_str(),success,total);
+                for (i=0;i<n;i++) {
+                    int success=y[i*2];
+                    int total=y[i*2]+y[i*2+1];
+                    FfsFileWriter::writeln("%d (xyz.%s)  :    %d / %d",fft->getLambda(i),fft->getName(i).c_str(),success,total);
                 }
             }
             delete[] y;
@@ -560,7 +560,7 @@ private:
     int n;
     int *p;
     int currentFlushIndicator;
-    static const int flushPeriod=100;
+    static const int flushPeriod=50;
     int currentPointer;
     static const char *(fileName[2]);
 };
