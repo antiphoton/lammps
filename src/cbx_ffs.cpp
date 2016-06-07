@@ -288,11 +288,12 @@ public:
         delete[] b;
         delete[] a;
     }
-    const std::string add() {
+    const std::string add(int lambda) {
         int x;
         if (local->isLeader) {
             x=a[local->id];
             a[local->id]++;
+            lambdaLocal.push_back(lambda);
         }
         MPI_Bcast(&x,1,MPI_INT,0,commLocal);
         return generateName(x);
@@ -300,14 +301,45 @@ public:
     void commit() {
         if (local->isLeader) {
             MPI_Allreduce(a,b,size,MPI_INT,MPI_SUM,commLeader);
+            int mySize=lambdaLocal.size();
+            int currentSize;
+            int maxSize;
+            MPI_Allreduce(&mySize,&maxSize,1,MPI_INT,MPI_MAX,commLeader);
+            int *p=new int[maxSize];
+            int i,j;
+            for (i=0;i<size;i++) {
+                if (i==local->id) {
+                    currentSize=mySize;
+                    std::copy(lambdaLocal.begin(),lambdaLocal.end(),p);
+                }
+                MPI_Bcast(&currentSize,1,MPI_INT,i,commLeader);
+                MPI_Bcast(p,currentSize,MPI_INT,i,commLeader);
+                for (j=0;j<currentSize;j++) {
+                    lambdaGlobal.push_back(p[j]);
+                }
+            }
+            delete[] p;
         }
         MPI_Bcast(b,size,MPI_INT,0,commLocal);
         total=0;
         for (int i=0;i<size;i++) {
             total+=b[i];
         }
+        int allSize=lambdaGlobal.size();
+        int *p=new int[allSize];
+        for (int i=0;i<allSize;i++) {
+            p[i]=lambdaGlobal[i];
+        }
+        MPI_Bcast(&allSize,1,MPI_INT,0,commLocal);
+        MPI_Bcast(p,allSize,MPI_INT,0,commLocal);
+        if (local->rank!=0) {
+            for (int i=0;i<allSize;i++) {
+                lambdaGlobal.push_back(p[i]);
+            }
+        }
+        delete[] p;
     }
-    const std::string get(int x) const {
+    const std::string getName(int x) const {
         x%=total;
         int i;
         for (i=0;i<size;i++) {
@@ -319,9 +351,14 @@ public:
             }
         }
     }
+    int getLambda(int x) const {
+        return lambdaGlobal[x%total];
+    }
 private:
     int layer;
     int *a,*b;
+    std::vector<int> lambdaLocal;
+    std::vector<int> lambdaGlobal;
     int total;
     const std::string generateName(int x, int branchId=-1) const {
         if (branchId==-1) {
@@ -440,7 +477,7 @@ int ffs_main(int argc, char **argv) {
             }
             int64_t timestep=lammps->update->ntimestep;
             static char strDump[100];
-            const std::string xyzFinal=currentTree->add();
+            const std::string xyzFinal=currentTree->add(lambda);
             sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
             fileTrajectory.writeln((const char *)0,0,velocitySeed,timestep,xyzFinal.c_str(),lambda);
             lammps_command(lammps,strDump);
@@ -458,7 +495,9 @@ int ffs_main(int argc, char **argv) {
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda"));
         while (1) {
             static char strReadData[100];
-            const std::string xyzInit=lastTree->get(rng.get());
+            const int initConfig=rng.get();
+            const std::string xyzInit=lastTree->getName(initConfig);
+            const int lambdaInit=lastTree->getLambda(initConfig);
             sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",xyzInit.c_str());
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
@@ -487,9 +526,9 @@ int ffs_main(int argc, char **argv) {
             }
             if (lambda_calc>=lambda_next) {
                 static char strDump[100];
-                const std::string xyzFinal=currentTree->add();
+                const std::string xyzFinal=currentTree->add(lambda_calc);
                 sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
-                fileTrajectory.writeln(xyzInit.c_str(),-1,velocitySeed,timestep,xyzFinal.c_str(),lambda_calc);
+                fileTrajectory.writeln(xyzInit.c_str(),lambdaInit,velocitySeed,timestep,xyzFinal.c_str(),lambda_calc);
                 lammps_command(lammps,strDump);
                 fcd->done();
                 continue;
