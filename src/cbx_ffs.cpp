@@ -524,10 +524,6 @@ public:
     ~FfsShootingStats() {
         writeStat();
     }
-    void reset(const FfsFileTree *fft) {
-        writeStat();
-        initStat(fft);
-    }
     void addSuccess(int x) {
         x%=n;
         p[x*2]++;
@@ -571,7 +567,6 @@ public:
             }
         }
     }
-private:
     void initStat(const FfsFileTree *fft) {
         if (!local->isLeader) {
             return ;
@@ -605,6 +600,7 @@ private:
         delete[] p;
         p=0;
     };
+private:
     const FfsFileTree *fft;
     int n;
     int *p;
@@ -739,7 +735,7 @@ int ffs_main(int argc, char **argv) {
         lastTree=currentTree;
         currentTree=new FfsFileTree(&continuedTrajectory,i);
         lastTree->commit();
-        fss.reset(lastTree);
+        fss.initStat(lastTree);
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(i));
         const int lambda_next=lambdaList[i+1];
         while (1) {
@@ -786,6 +782,7 @@ int ffs_main(int argc, char **argv) {
                 continue;
             }
         }
+        fss.writeStat();
     }
     delete lammps;
     delete local;
