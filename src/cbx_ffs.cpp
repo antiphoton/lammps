@@ -120,6 +120,9 @@ struct FfsFileReader: public FfsBranch {
         if (world->isLeader) {
             n=v.size();
             p=new int[n];
+            for (int i=0;i<n;i++) {
+                p[i]=v[i];
+            }
             for (int i=1;i<size;i++) {
                 MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLeader);
             }
@@ -738,6 +741,7 @@ int ffs_main(int argc, char **argv) {
         lastTree->commit();
         fss.reset(lastTree);
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(i));
+        const int lambda_next=lambdaList[i+1];
         while (1) {
             static char strReadData[100];
             const int initConfig=rng.get();
@@ -747,7 +751,7 @@ int ffs_main(int argc, char **argv) {
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
             lammps_command(lammps,(char *)"run 0 pre yes post no");
-            int lambda_calc,lambda_next=lambdaList[i+1];
+            int lambda_calc;
             while (1) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
