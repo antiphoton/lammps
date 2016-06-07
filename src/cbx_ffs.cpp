@@ -50,6 +50,8 @@ protected:
     static const int TAG_COUNTDOWN_TERMINATE=2;
     static const int TAG_FILEWRITER_LINE=3;
     static const int TAG_FILEREADER=5;
+    static const int TAG_STATS_FLUSH=6;
+    static const int TAG_STATS_DATA=7;
 };
 bool FfsBranch::commInited=false;
 MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
@@ -445,6 +447,9 @@ public:
     int getLambda(int x) const {
         return lambdaGlobal[x%total];
     }
+    int getTotal() const {
+        return total;
+    }
 private:
     int layer;
     int *a,*b;
@@ -460,6 +465,106 @@ private:
         return c;
     }
 };
+class FfsShootingStats: public FfsFileWriter {
+public:
+    FfsShootingStats():FfsFileWriter("shootingStat.txt") {
+        currentPointer=0;
+        n=0;
+        p=0;
+    }
+    ~FfsShootingStats() {
+        writeStat();
+    }
+    void reset(const FfsFileTree *fft) {
+        writeStat();
+        initStat(fft);
+    }
+    void addSuccess(int x) {
+        x%=n;
+        p[x*2]++;
+    }
+    void addFailure(int x) {
+        x%=n;
+        p[x*2+1]++;
+    }
+    void flush() {
+        if (!local->isLeader) {
+            return ;
+        }
+        if (world->isLeader) {
+            currentFlushIndicator++;
+            if (currentFlushIndicator>=flushPeriod) {
+                currentFlushIndicator=0;
+                int *y=new int[n*2];
+                int i;
+                for (i=1;i<size;i++) {
+                    MPI_Send(0,0,MPI_INT,i,TAG_STATS_FLUSH,commLeader);
+                }
+                MPI_Reduce(p,y,n*2,MPI_INT,MPI_SUM,0,commLeader);
+                FILE *f=fopen(fileName[currentPointer],"w");
+                currentPointer=(currentPointer+1)%2;
+                for (i=0;i<n;i++) {
+                    int success=y[i];
+                    int total=y[i]+y[i+1];
+                    fprintf(f,"xyz.%s  :    %d / %d\n",fft->getName(i).c_str(),success,total);
+                }
+                fclose(f);
+                delete[] y;
+            }
+        }
+        else {
+            int flag;
+            MPI_Status status;
+            MPI_Iprobe(0,TAG_STATS_FLUSH,commLeader,&flag,&status);
+            if (flag) {
+                MPI_Recv(0,0,MPI_INT,0,TAG_STATS_FLUSH,commLeader,&status);
+                MPI_Reduce(p,0,n*2,MPI_INT,MPI_SUM,0,commLeader);
+            }
+        }
+    }
+private:
+    void initStat(const FfsFileTree *fft) {
+        if (!local->isLeader) {
+            return ;
+        }
+        this->fft=fft;
+        n=fft->getTotal();
+        p=new int[n*2];
+        int i;
+        for (i=0;i<n*2;i++) {
+            p[i]=0;
+        }
+        currentFlushIndicator=0;
+    }
+    void writeStat() {
+        if (!local->isLeader) {
+            return ;
+        }
+        if (n>0) {
+            int *y=new int[n*2];
+            MPI_Reduce(p,y,n*2,MPI_INT,MPI_SUM,0,commLeader);
+            if (world->isLeader) {
+                int i;
+                for (i=0;i<n;i+=2) {
+                    int success=y[i];
+                    int total=y[i]+y[i+1];
+                    FfsFileWriter::writeln("xyz.%s  :    %d / %d",fft->getName(i).c_str(),success,total);
+                }
+            }
+            delete[] y;
+        }
+        delete[] p;
+        p=0;
+    };
+    const FfsFileTree *fft;
+    int n;
+    int *p;
+    int currentFlushIndicator;
+    static const int flushPeriod=100;
+    int currentPointer;
+    static const char *(fileName[2]);
+};
+const char *(FfsShootingStats::fileName[2])={"stat_A.txt","stat_B.txt"};
 bool ffsRequested(int argc, char **argv) {
     int i;
     for (i=0;i<argc;i++) {
@@ -577,6 +682,7 @@ int ffs_main(int argc, char **argv) {
         }
         lammps_command(lammps,(char *)"run 0 pre no post yes");
     }
+    FfsShootingStats fss;
     const int n=5;
     int lambda[n]={11,20,25,30,35};
     for (int i=1;i+1<n;i++) {
@@ -584,6 +690,7 @@ int ffs_main(int argc, char **argv) {
         lastTree=currentTree;
         currentTree=new FfsFileTree(&continuedTrajectory,i);
         lastTree->commit();
+        fss.reset(lastTree);
         FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(i));
         while (1) {
             static char strReadData[100];
@@ -599,6 +706,7 @@ int ffs_main(int argc, char **argv) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda_calc=(int)lambdaReuslt[0];
+                fss.flush();
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
                 }
@@ -614,9 +722,11 @@ int ffs_main(int argc, char **argv) {
             int64_t timestep=lammps->update->ntimestep;
             lammps_command(lammps,(char *)"run 0 pre no post yes");
             if (lambda_calc<=lambda_A) {
+                fss.addFailure(initConfig);
                 continue;
             }
             if (lambda_calc>=lambda_next) {
+                fss.addSuccess(initConfig);
                 static char strDump[100];
                 const std::string xyzFinal=currentTree->add(lambda_calc);
                 sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
