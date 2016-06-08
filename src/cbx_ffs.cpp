@@ -522,7 +522,6 @@ public:
         p=0;
     }
     ~FfsShootingStats() {
-        writeStat();
     }
     void addSuccess(int x) {
         x%=n;
@@ -684,8 +683,8 @@ int ffs_main(int argc, char **argv) {
     FfsTrajectoryReader continuedTrajectory;
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
-    static int lambda_A=ffsParams->getInt("lambda_A");
     const std::vector<int> lambdaList=ffsParams->getVector("lambda");
+    static int lambda_A=lambdaList[0];
     FfsRandomGenerator rng;
     FfsFileTree *lastTree,*currentTree;
     if (1) {
@@ -701,7 +700,7 @@ int ffs_main(int argc, char **argv) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda=(int)lambdaReuslt[0];
-                static int lambda_0=ffsParams->getInt("lambda_0");
+                static int lambda_0=lambdaList[1];
                 if (lambda<=lambda_A) {
                     ready=true;
                 }
@@ -729,7 +728,7 @@ int ffs_main(int argc, char **argv) {
         lammps_command(lammps,(char *)"run 0 pre no post yes");
     }
     FfsShootingStats fss;
-    const int n=5;
+    const int n=lambdaList.size();
     for (int i=1;i+1<n;i++) {
         delete lastTree;
         lastTree=currentTree;
