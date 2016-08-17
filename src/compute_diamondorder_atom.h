@@ -39,10 +39,10 @@ class ComputeDiamondOrderAtom : public Compute {
   int nmax,maxneigh,nnn,ndegree;
   double cutsq,rsoft;
   class NeighList *list;
-  double *distsq;
-  int *nearest;
+  double *distsqO,*distsqH;
+  int *nearestO,*nearestH;
   int hydrogenId,oxygenId;
-  double devSq;
+  double hydroDev;
 
   double **qlmarray;
   double *qnvector;
@@ -57,7 +57,7 @@ class ComputeDiamondOrderAtom : public Compute {
   double associated_legendre(int, int, double);
   double smearing(double) const;
 
-  bool hydrogenBond(double x1,double y1,double z1,double x2,double y2,double z2,int *iH) const;
+  bool hydrogenBond(int i,int j,int ncountH) const;
 };
 
 }

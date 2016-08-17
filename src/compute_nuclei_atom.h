@@ -42,6 +42,7 @@ class ComputeNucleiAtom : public Compute {
   double *threshold;
   double hardNeighbourDistance;
   int hardNeighbourCount;
+  int oxygenId;
 
   int nmax,commflag;
   double cutsq;

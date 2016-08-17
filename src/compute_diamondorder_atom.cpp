@@ -47,7 +47,7 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
   nnn = 6;
   cutsq = 0.0;
   rsoft=0;
-  devSq=-1;
+  hydroDev=-1;
   oxygenId=-1;
   hydrogenId=-1;
 
@@ -98,7 +98,7 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
           double deviation = force->numeric(FLERR,arg[iarg+1]);
           if (deviation < 0.0)
               error->all(FLERR,"Illegal compute diamondorder/atom command");
-          devSq = deviation*deviation;
+          hydroDev=deviation;
           iarg += 2;
       } else error->all(FLERR,"Illegal compute diamondorder/atom command");
   }
@@ -111,8 +111,10 @@ ComputeDiamondOrderAtom::ComputeDiamondOrderAtom(LAMMPS *lmp, int narg, char **a
   qlmarray=NULL;
   qnvector = NULL;
   maxneigh = 0;
-  distsq = NULL;
-  nearest = NULL;
+  distsqO = NULL;
+  distsqH = NULL;
+  nearestO = NULL;
+  nearestH = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -121,8 +123,10 @@ ComputeDiamondOrderAtom::~ComputeDiamondOrderAtom()
 {
   memory->destroy(qlmarray);
   memory->destroy(qnvector);
-  memory->destroy(distsq);
-  memory->destroy(nearest);
+  memory->destroy(distsqO);
+  memory->destroy(distsqH);
+  memory->destroy(nearestO);
+  memory->destroy(nearestH);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -187,7 +191,6 @@ void ComputeDiamondOrderAtom::compute_peratom()
   int i,j,ii,jj,inum,jnum;
   double xtmp,ytmp,ztmp,delx,dely,delz,rsq;
   int *ilist,*jlist,*numneigh,**firstneigh;
-  int *iH=new int[4];
 
   invoked_peratom = update->ntimestep;
 
@@ -233,76 +236,65 @@ void ComputeDiamondOrderAtom::compute_peratom()
       // insure distsq and nearest arrays are long enough
 
       if (jnum > maxneigh) {
-        memory->destroy(distsq);
-        memory->destroy(nearest);
+        memory->destroy(distsqO);
+        memory->destroy(distsqH);
+        memory->destroy(nearestO);
+        memory->destroy(nearestH);
         maxneigh = jnum;
-        memory->create(distsq,maxneigh,"diamondorder/atom:distsq");
-        memory->create(nearest,maxneigh,"diamondorder/atom:nearest");
+        memory->create(distsqO,maxneigh,"diamondorder/atom:distsqO");
+        memory->create(distsqH,maxneigh,"diamondorder/atom:distsqH");
+        memory->create(nearestO,maxneigh,"diamondorder/atom:nearestO");
+        memory->create(nearestH,maxneigh,"diamondorder/atom:nearestH");
       }
 
       // loop over list of all neighbors within force cutoff
       // distsq[] = distance sq to each
       // nearest[] = atom indices of neighbors
 
-      iH[0]=atom->map(atom->tag[i]+1);
-      iH[1]=atom->map(atom->tag[i]+2);
-
-      int ncount = 0;
-      double sWeight=0;
+      int ncountO = 0, ncountH = 0;
       for (jj = 0; jj < jnum; jj++) {
         j = jlist[jj];
         j &= NEIGHMASK;
-        if (oxygenId>=0&&atom->type[j]!=oxygenId) {
-            continue;
-        }
 
         delx = xtmp - x[j][0];
         dely = ytmp - x[j][1];
         delz = ztmp - x[j][2];
 
-        iH[2]=atom->map(atom->tag[j]+1);
-        iH[3]=atom->map(atom->tag[j]+2);
-
-        if (!hydrogenBond(xtmp,ytmp,ztmp,delx,dely,delz,iH)) {
-            continue;
-        }
-
         rsq = delx*delx + dely*dely + delz*delz;
         if (rsq < cutsq) {
-          distsq[ncount] = rsq;
-          nearest[ncount++] = j;
+            if (oxygenId<0||atom->type[j]==oxygenId) {
+                distsqO[ncountO] = rsq;
+                nearestO[ncountO++] = j;
+            }
+            if (oxygenId>=0&&hydrogenId>=0&&atom->type[j]==hydrogenId) {
+                distsqH[ncountH] = rsq;
+                nearestH[ncountH++] = j;
+            }
         }
-      }
-
-      // if not nnn neighbors, order parameter = 0;
-
-      if (ncount==0) {
-          for (int m=0;m<2*ndegree+1;m++) {
-              qlm[m*2]=0;
-              qlm[m*2+1]=0;
-          }
-          continue;
-      }
-      if (ncount < nnn) {
-	//qn[0] = qn[1] = 0.0;
-        //continue;
       }
 
       // if nnn > 0, use only nearest nnn neighbors
 
-      if (nnn > 0 && nnn<ncount) {
-
-          select2(nnn,ncount,distsq,nearest);
-          ncount = nnn;
+      if (nnn > 0 && nnn<ncountO) {
+          select2(nnn,ncountO,distsqO,nearestO);
+          ncountO = nnn;
+      }
+      if (nnn > 0 && nnn<ncountH) {
+          select2(nnn,ncountH,distsqH,nearestH);
+          ncountH = nnn;
       }
       for (int m=0;m<2*ndegree+1;m++) {
           qlm[m*2]=0;
           qlm[m*2+1]=0;
           double sWeight=0;
 
-          for (jj = 0; jj < ncount; jj++) {
-            j = nearest[jj];
+          for (jj = 0; jj < ncountO; jj++) {
+            j = nearestO[jj];
             j &= NEIGHMASK;
+
+            if (!hydrogenBond(i,j,ncountH)) {
+                continue;
+            }
             
             delx = xtmp - x[j][0];
             dely = ytmp - x[j][1];
@@ -316,7 +308,7 @@ void ComputeDiamondOrderAtom::compute_peratom()
             add_qlm_complex(m-ndegree,weight,delx,dely,delz,qlm+m*2,qlm+m*2+1);
             sWeight+=weight;
           }
-          if (ncount>0) {
+          if (ncountO>0) {
               qlm[m*2]/=sWeight;
               qlm[m*2+1]/=sWeight;
           }
@@ -341,57 +333,63 @@ void ComputeDiamondOrderAtom::compute_peratom()
       // insure distsq and nearest arrays are long enough
 
       if (jnum > maxneigh) {
-        memory->destroy(distsq);
-        memory->destroy(nearest);
+        memory->destroy(distsqO);
+        memory->destroy(distsqH);
+        memory->destroy(nearestO);
+        memory->destroy(nearestH);
         maxneigh = jnum;
-        memory->create(distsq,maxneigh,"diamondorder/atom:distsq");
-        memory->create(nearest,maxneigh,"diamondorder/atom:nearest");
+        memory->create(distsqO,maxneigh,"diamondorder/atom:distsqO");
+        memory->create(distsqH,maxneigh,"diamondorder/atom:distsqH");
+        memory->create(nearestO,maxneigh,"diamondorder/atom:nearestO");
+        memory->create(nearestH,maxneigh,"diamondorder/atom:nearestH");
       }
 
       // loop over list of all neighbors within force cutoff
       // distsq[] = distance sq to each
       // nearest[] = atom indices of neighbors
 
-      int ncount = 0;
+      int ncountO = 0, ncountH = 0;
       for (jj = 0; jj < jnum; jj++) {
         j = jlist[jj];
         j &= NEIGHMASK;
 
-        if (oxygenId>=0&&atom->type[j]!=oxygenId) {
-            continue;
-        }
-
         delx = xtmp - x[j][0];
         dely = ytmp - x[j][1];
         delz = ztmp - x[j][2];
+
         rsq = delx*delx + dely*dely + delz*delz;
         if (rsq < cutsq) {
-          distsq[ncount] = rsq;
-          nearest[ncount++] = j;
+            if (oxygenId<0||atom->type[j]==oxygenId) {
+                distsqO[ncountO] = rsq;
+                nearestO[ncountO++] = j;
+            }
+            if (oxygenId>=0&&hydrogenId>=0&&atom->type[j]==hydrogenId) {
+                distsqH[ncountH] = rsq;
+                nearestH[ncountH++] = j;
+            }
         }
       }
-
-      // if not nnn neighbors, order parameter = 0;
-
-      if (ncount < nnn) {
-	//qn[0] = qn[1] = 0.0;
-        //continue;
-      }
-
       // if nnn > 0, use only nearest nnn neighbors
-
-      if (nnn > 0&&nnn<ncount) {
-          select2(nnn,ncount,distsq,nearest);
-          ncount = nnn;
+      
+      if (nnn > 0 && nnn<ncountO) {
+          select2(nnn,ncountO,distsqO,nearestO);
+          ncountO = nnn;
+      }
+      if (nnn > 0 && nnn<ncountH) {
+          select2(nnn,ncountH,distsqH,nearestH);
+          ncountH = nnn;
       }
 
       double usum = 0.0;
       double vsum = 0.0;
       double sWeight=0;
 
-      for (jj = 0; jj < ncount; jj++) {
-          j = nearest[jj];
+      for (jj = 0; jj < ncountO; jj++) {
+          j = nearestO[jj];
           j &= NEIGHMASK;
+          if (!hydrogenBond(i,j,ncountH)) {
+              continue;
+          }
           double delx=atom->x[j][0]-atom->x[i][0];
           double dely=atom->x[j][1]-atom->x[i][1];
           double delz=atom->x[j][2]-atom->x[i][2];
@@ -399,14 +397,13 @@ void ComputeDiamondOrderAtom::compute_peratom()
           add_qn_complex(i, j, weight, &usum, &vsum);
           sWeight+=weight;
       }
-      if (ncount>0) {
+      if (ncountO>0) {
           usum/=sWeight;
           vsum/=sWeight;
       }
       qnvector[i]=usum;
     }
   }
-  delete[] iH;
 }
 
 void ComputeDiamondOrderAtom::add_qlm_complex(int m,double frr,double x,double y,double z,double *u,double *v) {
@@ -506,6 +503,7 @@ void ComputeDiamondOrderAtom::select2(int k, int n, double *arr, int *iarr)
   }
 }
 
+
 /* ----------------------------------------------------------------------
    memory usage of local atom-based array
 ------------------------------------------------------------------------- */
@@ -575,22 +573,36 @@ double ComputeDiamondOrderAtom::smearing(double r) const {
     }
 }
 
-inline bool withinDev(double x0,double y0,double z0,double x,double y,double z,double devSq) {
-    double xp=y0*z-z0*y;
-    double yp=z0*x-x0*z;
-    double zp=x0*y-y0*x;
-    return (x0*x0+y0*y0+z0*z0)*devSq>=xp*xp+yp*yp+zp*zp;
+inline double dis(double x1,double y1,double z1,double x2,double y2,double z2) {
+    return sqrt((x1-x2)*(x1-x2)+(y1-y2)*(y1-y2)+(z1-z2)*(z1-z2));
 }
-bool ComputeDiamondOrderAtom::hydrogenBond(double x1,double y1,double z1,double x21,double y21,double z21,int *iH) const {
-    if (devSq<0) {
+bool ComputeDiamondOrderAtom::hydrogenBond(int i,int j,int ncountH) const {
+    if (hydroDev<0||hydrogenId<0) {
         return true;
     }
-    int s=0;
-    int i;
-    for (i=0;i<4;i++) {
-        double *p=atom->x[iH[i]];
-        s+=withinDev(x21,y21,z21,p[0]-x1,p[1]-y1,p[2]-z1,devSq);
+    bool ret=false;
+    double **p=atom->x;
+    double x1=p[i][0];
+    double y1=p[i][1];
+    double z1=p[i][2];
+    double x2=p[j][0];
+    double y2=p[j][1];
+    double z2=p[j][2];
+    double dc=dis(x1,y1,z1,x2,y2,z2)+hydroDev;
+    int kk,k;
+    //printf("%d\n",ncountH);
+    for (kk=0;kk<ncountH;kk++) {
+        k=nearestH[kk];
+        k&=NEIGHMASK;
+        double x3=atom->x[k][0];
+        double y3=atom->x[k][1];
+        double z3=atom->x[k][2];
+        double d1=dis(x1,y1,z1,x3,y3,z3);
+        double d2=dis(x2,y2,z2,x3,y3,z3);
+        if (d1+d2<=dc) {
+            ret=true;
+        }
     }
-    return s==1;
+    return ret;
 }
 

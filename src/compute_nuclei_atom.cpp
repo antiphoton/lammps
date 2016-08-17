@@ -45,14 +45,13 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
 {
   if (narg < 4) error->all(FLERR,"Illegal compute nuclei/atom command");
 
-  if ((narg-4)%3!=0) error->all(FLERR,"Illegal compute nuclei/atom command");
-
   nConditions=(narg-4)/3;
   value2index=new int[nConditions];
   compareDirection=new bool[nConditions];
   threshold=new double[nConditions];
   hardNeighbourDistance=0;
   hardNeighbourCount=0;
+  oxygenId=-1;
   int iCondition=0;
   int iarg = 4;
   while (iarg < narg) {
@@ -78,6 +77,13 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
         hardNeighbourDistance=force->numeric(FLERR,arg[iarg+1]);
         hardNeighbourCount=force->numeric(FLERR,arg[iarg+2]);
         iarg+=2;
+    }
+    else if (strcmp(arg[iarg],"oxygen") == 0) {
+        oxygenId=force->numeric(FLERR,arg[iarg+1]);
+        if (oxygenId<0) {
+            error->all(FLERR,"Illegal compute nuclei/atom command");
+        }
+        iarg+=1;
     } else error->all(FLERR,"Illegal compute nuclei/atom command");
     iarg++;
   }
@@ -95,6 +101,7 @@ ComputeNucleiAtom::ComputeNucleiAtom(LAMMPS *lmp, int narg, char **arg) :
   comm_forward = 2;
 
   nmax = 0;
+  isSolid = NULL;
   nucleiID = NULL;
 }
 
@@ -371,6 +378,9 @@ void ComputeNucleiAtom::invokePrerequisites() const {
     }
 }
 bool ComputeNucleiAtom::checkSolid(int i) const {
+    if (oxygenId>=0&&atom->type[i]!=oxygenId) {
+        return false;
+    }
     if (hardNeighbourDistance>0) {
         double disSqr=hardNeighbourDistance*hardNeighbourDistance;
         int neighbourCount=0;
@@ -383,6 +393,10 @@ bool ComputeNucleiAtom::checkSolid(int i) const {
         int jj;
         for (jj=0;jj<jnum;jj++) {
             int j=jlist[jj];
+            j&=NEIGHMASK;
+            if (oxygenId>=0&&atom->type[j]!=oxygenId) {
+                continue;
+            }
             double x2=p[j][0];
             double y2=p[j][1];
             double z2=p[j][2];
