@@ -50,6 +50,7 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
   hydroDev=-1;
   oxygenId=-1;
   hydrogenId=-1;
+  computeNucleiId=true;
 
 
   // process optional args
@@ -96,6 +97,8 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
               error->all(FLERR,"Illegal compute diamondlambda/atom command");
           hydroDev=deviation;
           iarg += 2;
+      } else if (strcmp(arg[iarg],"orderParameterOnly") == 0) {
+          computeNucleiId=false;
       } else error->all(FLERR,"Illegal compute diamondlambda/atom command");
   }
 
@@ -103,7 +106,7 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
   size_peratom_cols = 0;
 
   nmax = 0;
-  comm_forward=1;
+  comm_forward=2*(ndegree*2+1);
   hydrogenBondNeigh=NULL;
   qlmarray=NULL;
   qnvector = NULL;
@@ -167,20 +170,24 @@ void ComputeDiamondLambdaAtom::init_list(int id, NeighList *ptr)
 
 
 int ComputeDiamondLambdaAtom::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
-    int i,j,m;
+    int i,j,k,m;
     m=0;
     for (i=0;i<n;i++) {
         j=list[i];
-        buf[m++]=qlmarray[j][i_comm];
+        for (k=0;k<2*(ndegree*2+1);k++) {
+            buf[m++]=qlmarray[j][k];
+        }
     }
     return m;
 }
 void ComputeDiamondLambdaAtom::unpack_forward_comm(int n, int first, double *buf) {
-    int i,m,last;
+    int i,k,m,last;
     m=0;
     last=first+n;
     for (i=first;i<last;i++) {
-        qlmarray[i][i_comm]=buf[m++];
+        for (k=0;k<2*(ndegree*2+1);k++) {
+            qlmarray[i][k]=buf[m++];
+        }
     }
 }
 
@@ -336,9 +343,7 @@ void ComputeDiamondLambdaAtom::compute_peratom()
           }
       }
   }
-  for (i_comm=0;i_comm<2*(ndegree*2+1);i_comm++) {
-      comm->forward_comm_compute(this);
-  }
+  comm->forward_comm_compute(this);
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
       xtmp = x[i][0];
@@ -371,6 +376,9 @@ void ComputeDiamondLambdaAtom::compute_peratom()
           vsum/=sWeight;
       }
       qnvector[i]=usum;
+  }
+  if (!computeNucleiId) {
+      return ;
   }
 }
 
