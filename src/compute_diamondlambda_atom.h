@@ -44,10 +44,19 @@ class ComputeDiamondLambdaAtom : public Compute {
   int *nearestO,*nearestH;
   int hydrogenId,oxygenId;
   double hydroDev;
+  bool packQlm,packSolid,packNuclei;
+  bool computeNucleiId;
+  int nConditions;
+  int *value2index;
+  bool *compareDirection;// true for greater than, false for less than
+  double *threshold;
+  double hardNeighbourDistance;
+  int hardNeighbourCount;
 
   double **qlmarray;
   double *qnvector;
-  int i_comm;
+  double *nucleiID;
+  double *isSolid;
 
   void add_qlm_complex(int m,double frr,double normx,double normy,double normz,double *u,double *v);
   void add_qn_complex(int, int, double, double*, double*);
@@ -59,6 +68,7 @@ class ComputeDiamondLambdaAtom : public Compute {
   double smearing(double) const;
 
   bool hydrogenBond(int i,int j,int ncountH) const;
+  bool checkSolid(int ii) const;
 };
 
 }

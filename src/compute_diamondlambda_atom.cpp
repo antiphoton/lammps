@@ -52,6 +52,13 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
   hydrogenId=-1;
   computeNucleiId=true;
 
+  nConditions=1;//This should be able to be extended in the future
+  compareDirection=new bool[nConditions];
+  threshold=new double[nConditions];
+  hardNeighbourDistance=0;
+  hardNeighbourCount=0;
+  int iCondition=0;
+
 
   // process optional args
 
@@ -99,6 +106,20 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
           iarg += 2;
       } else if (strcmp(arg[iarg],"orderParameterOnly") == 0) {
           computeNucleiId=false;
+          iarg += 1;
+      } else if (strcmp(arg[iarg],"self") == 0) {
+          if (arg[iarg+1][0] == 'g') compareDirection[iCondition] = true;
+          else if (arg[iarg+1][0] == 'l') compareDirection[iCondition] = false;
+          else error->all(FLERR,"Illegal compute diamondlambda/atom command");
+
+          threshold[iCondition]=force->numeric(FLERR,arg[iarg+2]);
+          iCondition++;
+          iarg+=3;
+      }
+      else if (strcmp(arg[iarg],"hardNeighbour") == 0) {
+          hardNeighbourDistance=force->numeric(FLERR,arg[iarg+1]);
+          hardNeighbourCount=force->numeric(FLERR,arg[iarg+2]);
+          iarg+=3;
       } else error->all(FLERR,"Illegal compute diamondlambda/atom command");
   }
 
@@ -110,6 +131,8 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
   hydrogenBondNeigh=NULL;
   qlmarray=NULL;
   qnvector = NULL;
+  isSolid = NULL;
+  nucleiID = NULL;
   maxneigh = 0;
   distsqO = NULL;
   distsqH = NULL;
@@ -121,6 +144,10 @@ ComputeDiamondLambdaAtom::ComputeDiamondLambdaAtom(LAMMPS *lmp, int narg, char *
 
 ComputeDiamondLambdaAtom::~ComputeDiamondLambdaAtom()
 {
+  memory->destroy(isSolid);
+  memory->destroy(nucleiID);
+  delete[] compareDirection;
+  delete[] threshold;
   memory->destroy(hydrogenBondNeigh);
   memory->destroy(qlmarray);
   memory->destroy(qnvector);
@@ -170,23 +197,39 @@ void ComputeDiamondLambdaAtom::init_list(int id, NeighList *ptr)
 
 
 int ComputeDiamondLambdaAtom::pack_forward_comm(int n, int *list, double *buf, int pbc_flag, int *pbc) {
-    int i,j,k,m;
+    int i,j,m;
     m=0;
     for (i=0;i<n;i++) {
         j=list[i];
-        for (k=0;k<2*(ndegree*2+1);k++) {
-            buf[m++]=qlmarray[j][k];
+        if (packQlm) {
+            for (int k=0;k<2*(ndegree*2+1);k++) {
+                buf[m++]=qlmarray[j][k];
+            }
+        }
+        if (packSolid) {
+            buf[m++] = isSolid[j];
+        }
+        if (packNuclei) {
+            buf[m++] = nucleiID[j];
         }
     }
     return m;
 }
 void ComputeDiamondLambdaAtom::unpack_forward_comm(int n, int first, double *buf) {
-    int i,k,m,last;
+    int i,m,last;
     m=0;
     last=first+n;
     for (i=first;i<last;i++) {
-        for (k=0;k<2*(ndegree*2+1);k++) {
-            qlmarray[i][k]=buf[m++];
+        if (packQlm) {
+            for (int k=0;k<2*(ndegree*2+1);k++) {
+                qlmarray[i][k]=buf[m++];
+            }
+        }
+        if (packSolid) {
+            isSolid[i] = buf[m++];
+        }
+        if (packNuclei) {
+            nucleiID[i] = buf[m++];
         }
     }
 }
@@ -201,12 +244,16 @@ void ComputeDiamondLambdaAtom::compute_peratom()
 
   // grow lambda parameter array if necessary
 
-  if (atom->nlocal > nmax) {
+  if (atom->nlocal + atom->nghost > nmax) {
     memory->destroy(qlmarray);
     memory->destroy(qnvector);
+    memory->destroy(isSolid);
+    memory->destroy(nucleiID);
     nmax = atom->nmax;
     memory->create(qlmarray,nmax,(2*ndegree+1)*2,"diamondlambda/atom:qlmarray");
     memory->create(qnvector,nmax,"diamondlambda/atom:qnvector");
+    memory->create(isSolid,nmax,"diamondlambda/atom:isSolid");
+    memory->create(nucleiID,nmax,"diamondlambda/atom:nucleiID");
     vector_atom = qnvector;
   }
 
@@ -343,6 +390,9 @@ void ComputeDiamondLambdaAtom::compute_peratom()
           }
       }
   }
+  packQlm=true;
+  packSolid=false;
+  packNuclei=false;
   comm->forward_comm_compute(this);
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
@@ -379,6 +429,113 @@ void ComputeDiamondLambdaAtom::compute_peratom()
   }
   if (!computeNucleiId) {
       return ;
+  }
+  tagint *tag = atom->tag;
+  for (ii = 0; ii < inum; ii++) {
+    i = ilist[ii];
+    if (mask[i] & groupbit) {
+        nucleiID[i] = tag[i];
+    }
+    else {
+        nucleiID[i] = 0;
+    }
+    isSolid[i]=checkSolid(ii)?1:0;
+  }
+  packQlm=false;
+  packSolid=true;
+  packNuclei=false;
+  comm->forward_comm_compute(this);
+  packQlm=false;
+  packSolid=false;
+  packNuclei=true;
+  comm->forward_comm_compute(this);
+  vector_atom = nucleiID;
+
+  int change,done,anychange;
+
+  while (1) {
+      change = 0;
+      while (1) {
+          done = 1;
+          for (ii = 0; ii < inum; ii++) {
+              i = ilist[ii];
+              if (!(mask[i] & groupbit)) continue;
+              if (!isSolid[i]) {
+                  continue;
+              }
+
+              xtmp = x[i][0];
+              ytmp = x[i][1];
+              ztmp = x[i][2];
+              for (jj = 0; jj < nnn; jj++) {
+                  j = hydrogenBondNeigh[ii][jj];
+                  if (j==-1) {
+                      break;
+                  }
+                  if (nucleiID[i] == nucleiID[j]) {
+                      continue;
+                  }
+                  if (!isSolid[j]) {
+                      continue;
+                  }
+
+                  delx = xtmp - x[j][0];
+                  dely = ytmp - x[j][1];
+                  delz = ztmp - x[j][2];
+                  rsq = delx*delx + dely*dely + delz*delz;
+                  if (rsq < cutsq) {
+                      int iMin = MIN(nucleiID[i],nucleiID[j]);
+                      nucleiID[i] = nucleiID[j] = iMin;
+                      done = 0;
+                  }
+              }
+          }
+          if (!done) change = 1;
+          if (done) break;
+      }
+      MPI_Allreduce(&change,&anychange,1,MPI_INT,MPI_MAX,world);
+      if (!anychange) break;
+      packQlm=false;
+      packSolid=false;
+      packNuclei=true;
+      comm->forward_comm_compute(this);
+  }
+  if (1) {
+      for (ii = 0; ii < inum; ii++) {
+          i = ilist[ii];
+          if (!(mask[i] & groupbit)) continue;
+          if (isSolid[i]) {
+              continue;
+          }
+          nucleiID[i]=0;
+
+          xtmp = x[i][0];
+          ytmp = x[i][1];
+          ztmp = x[i][2];
+
+          for (jj = 0; jj < nnn; jj++) {
+              j = hydrogenBondNeigh[ii][jj];
+              if (j==-1) {
+                  break;
+              }
+              if (nucleiID[i] == nucleiID[j]) continue;
+              if (!isSolid[j]) {
+                  continue;
+              }
+
+              delx = xtmp - x[j][0];
+              dely = ytmp - x[j][1];
+              delz = ztmp - x[j][2];
+              rsq = delx*delx + dely*dely + delz*delz;
+              if (rsq < cutsq) {
+                  if (nucleiID[i]==0||nucleiID[i]>nucleiID[j]) {
+                      double iMin = nucleiID[j] +0.5;
+                      nucleiID[i] = iMin;
+                  }
+              }
+          }
+      }
+      MPI_Barrier(world);
   }
 }
 
@@ -577,6 +734,55 @@ bool ComputeDiamondLambdaAtom::hydrogenBond(int i,int j,int ncountH) const {
         double d2=dis(x2,y2,z2,x3,y3,z3);
         if (d1+d2<=dc) {
             ret=true;
+        }
+    }
+    return ret;
+}
+bool ComputeDiamondLambdaAtom::checkSolid(int ii) const {
+    int i=list->ilist[ii];
+    if (oxygenId>=0&&atom->type[i]!=oxygenId) {
+        return false;
+    }
+    if (hardNeighbourDistance>0) {
+        double disSqr=hardNeighbourDistance*hardNeighbourDistance;
+        int neighbourCount=0;
+        double **p=atom->x;
+        double x1=p[i][0];
+        double y1=p[i][1];
+        double z1=p[i][2];
+        for (int jj = 0; jj < nnn; jj++) {
+            int j = hydrogenBondNeigh[ii][jj];
+            if (j==-1) {
+                break;
+            }
+            double x2=p[j][0];
+            double y2=p[j][1];
+            double z2=p[j][2];
+            double xd=x2-x1;
+            double yd=y2-y1;
+            double zd=z2-z1;
+            double currentDisSqr=xd*xd+yd*yd+zd*zd;
+            if (currentDisSqr<=disSqr) {
+                neighbourCount++;
+            }
+        }
+        if (neighbourCount<hardNeighbourCount) {
+            return false;
+        }
+    }
+    bool ret=true;
+    int m;
+    for (m=0;m<nConditions;m++) {
+        bool cd=compareDirection[m];
+        double td=threshold[m];
+        if (cd) {
+            ret=ret&&qnvector[i]>td;
+        }
+        else {
+            ret=ret&&qnvector[i]<td;
+        }
+        if (ret==false) {
+            break;
         }
     }
     return ret;
