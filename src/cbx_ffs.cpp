@@ -172,6 +172,7 @@ protected:
         if (world->isLeader) {
             f=fopen(filename,"w");
         }
+        nFlush=0;
     }
     ~FfsFileWriter() {
         check();
@@ -210,6 +211,9 @@ protected:
             }
         }
     }
+    void pushGroup(int n) {
+        nFlush+=n;
+    }
 private:
     FILE *f;
     void putstr(char *s) {
@@ -222,14 +226,38 @@ private:
             MPI_Send(s,l+1,MPI_CHAR,0,TAG_FILEWRITER_LINE,commLeader);
         }
     }
+    int nFlush;
     void putstr0(int sender,const char *s) {
         static char buffer[MAX_LENGTH];
         sprintf(buffer,"%4d    %s",sender,s);
         fprintf(f,"%s\n",buffer);
         printf("%s\n",buffer);
-        fflush(f);
+        if (nFlush<=0) {
+            fflush(f);
+        }
+        else {
+            nFlush--;
+        }
     }
     static const int MAX_LENGTH=100;
+};
+class FfsLambdaLogger: public FfsFileWriter {
+public:
+    FfsLambdaLogger():FfsFileWriter("lambda.txt") {
+    }
+    void check() {
+        FfsFileWriter::check();
+    }
+    void writeln(const char *xyzInit, const char *xyzFinal,const std::vector<int> &v) {
+        int n=v.size();
+        FfsFileWriter::pushGroup(1+n+1);
+        FfsFileWriter::writeln("BEGIN %s",xyzInit);
+        int i;
+        for (i=0;i<n;i++) {
+            FfsFileWriter::writeln("%d",v[i]);
+        }
+        FfsFileWriter::writeln("END %s",xyzFinal);
+    }
 };
 class FfsTrajectoryWriter: public FfsFileWriter {
 public:

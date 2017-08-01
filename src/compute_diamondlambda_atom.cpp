@@ -254,7 +254,12 @@ void ComputeDiamondLambdaAtom::compute_peratom()
     memory->create(qnvector,nmax,"diamondlambda/atom:qnvector");
     memory->create(isSolid,nmax,"diamondlambda/atom:isSolid");
     memory->create(nucleiID,nmax,"diamondlambda/atom:nucleiID");
-    vector_atom = qnvector;
+    if (computeNucleiId) {
+        vector_atom = nucleiID;
+    }
+    else {
+        vector_atom = qnvector;
+    }
   }
 
   // invoke full neighbor list (will copy or build if necessary)
@@ -449,7 +454,6 @@ void ComputeDiamondLambdaAtom::compute_peratom()
   packSolid=false;
   packNuclei=true;
   comm->forward_comm_compute(this);
-  vector_atom = nucleiID;
 
   int change,done,anychange;
 
