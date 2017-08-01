@@ -35,8 +35,10 @@ class ComputeTempProfile : public Compute {
   void compute_array();
 
   void remove_bias(int, double *);
+  void remove_bias_thr(int, double *, double *);
   void remove_bias_all();
   void restore_bias(int, double *);
+  void restore_bias_thr(int, double *, double *);
   void restore_bias_all();
   double memory_usage();
 
@@ -82,5 +84,10 @@ Self-explanatory.
 E: Compute temp/profile cannot bin z for 2d systems
 
 Self-explanatory.
+
+E: Temperature compute degrees of freedom < 0
+
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

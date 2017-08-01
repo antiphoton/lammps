@@ -39,7 +39,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeTempCS::ComputeTempCS(LAMMPS *lmp, int narg, char **arg) :
-  Compute(lmp, narg, arg)
+  Compute(lmp, narg, arg), vint(NULL), id_fix(NULL), fix(NULL)
 {
   if (narg != 5) error->all(FLERR,"Illegal compute temp/cs command");
 
@@ -74,13 +74,14 @@ ComputeTempCS::ComputeTempCS(LAMMPS *lmp, int narg, char **arg) :
   strcpy(id_fix,id);
   strcat(id_fix,"_COMPUTE_STORE");
 
-  char **newarg = new char*[5];
+  char **newarg = new char*[6];
   newarg[0] = id_fix;
   newarg[1] = group->names[igroup];
   newarg[2] = (char *) "STORE";
-  newarg[3] = (char *) "0";
-  newarg[4] = (char *) "1";
-  modify->add_fix(5,newarg);
+  newarg[3] = (char *) "peratom";
+  newarg[4] = (char *) "0";
+  newarg[5] = (char *) "1";
+  modify->add_fix(6,newarg);
   fix = (FixStore *) modify->fix[modify->nfix-1];
   delete [] newarg;
 
@@ -308,7 +309,7 @@ void ComputeTempCS::vcm_pairs()
 
   int nlocal = atom->nlocal;
 
-  if (nlocal > maxatom) {
+  if (atom->nmax > maxatom) {
     memory->destroy(vint);
     maxatom = atom->nmax;
     memory->create(vint,maxatom,3,"temp/cs:vint");

@@ -75,7 +75,7 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
 
   if (neighflag == FULL) no_virial_fdotr_compute = 1;
 
-  if (eflag || vflag) ev_setup(eflag,vflag);
+  if (eflag || vflag) ev_setup(eflag,vflag,0);
   else evflag = vflag_fdotr = 0;
 
   // reallocate per-atom arrays if necessary
@@ -83,12 +83,12 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
   if (eflag_atom) {
     memory->destroy_kokkos(k_eatom,eatom);
     memory->create_kokkos(k_eatom,eatom,maxeatom,"pair:eatom");
-    d_eatom = k_eatom.d_view;
+    d_eatom = k_eatom.view<DeviceType>();
   }
   if (vflag_atom) {
     memory->destroy_kokkos(k_vatom,vatom);
     memory->create_kokkos(k_vatom,vatom,maxvatom,6,"pair:vatom");
-    d_vatom = k_vatom.d_view;
+    d_vatom = k_vatom.view<DeviceType>();
   }
 
   atomKK->sync(execution_space,datamask_read);
@@ -104,7 +104,6 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
   x = atomKK->k_x.view<DeviceType>();
   f = atomKK->k_f.view<DeviceType>();
   q = atomKK->k_q.view<DeviceType>();
-  type = atomKK->k_type.view<DeviceType>();
   nlocal = atom->nlocal;
   nall = atom->nlocal + atom->nghost;
   newton_pair = force->newton_pair;
@@ -122,9 +121,6 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
 
   int inum = list->inum;
 
-  // Call cleanup_copy which sets allocations NULL which are destructed by the PairStyle
-
-  k_list->clean_copy();
   copymode = 1;
 
   // loop over neighbors of my atoms
@@ -174,7 +170,6 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
       }
     }
   }
-  DeviceType::fence();
 
   if (eflag_global) eng_coul += ev.ecoul;
   if (vflag_global) {
@@ -186,8 +181,6 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
     virial[5] += ev.v[5];
   }
 
-  if (vflag_fdotr) pair_virial_fdotr_compute(this);
-
   if (eflag_atom) {
     k_eatom.template modify<DeviceType>();
     k_eatom.template sync<LMPHostType>();
@@ -197,6 +190,8 @@ void PairCoulWolfKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
     k_vatom.template modify<DeviceType>();
     k_vatom.template sync<LMPHostType>();
   }
+
+  if (vflag_fdotr) pair_virial_fdotr_compute(this);
 
   copymode = 0;
 }
@@ -224,11 +219,9 @@ void PairCoulWolfKokkos<DeviceType>::init_style()
   if (neighflag == FULL) {
     neighbor->requests[irequest]->full = 1;
     neighbor->requests[irequest]->half = 0;
-    neighbor->requests[irequest]->full_cluster = 0;
   } else if (neighflag == HALF || neighflag == HALFTHREAD) {
     neighbor->requests[irequest]->full = 0;
     neighbor->requests[irequest]->half = 1;
-    neighbor->requests[irequest]->full_cluster = 0;
   } else {
     error->all(FLERR,"Cannot use chosen neighbor list style with coul/wolf/kk");
   }
@@ -251,7 +244,6 @@ void PairCoulWolfKokkos<DeviceType>::operator()(TagPairCoulWolfKernelA<NEIGHFLAG
   const X_FLOAT ytmp = x(i,1);
   const X_FLOAT ztmp = x(i,2);
   const F_FLOAT qtmp = q[i];
-  const int itype = type(i);
 
   if (eflag) {
     const F_FLOAT qisq = qtmp*qtmp;
@@ -277,7 +269,6 @@ void PairCoulWolfKokkos<DeviceType>::operator()(TagPairCoulWolfKernelA<NEIGHFLAG
     const X_FLOAT delx = xtmp - x(j,0);
     const X_FLOAT dely = ytmp - x(j,1);
     const X_FLOAT delz = ztmp - x(j,2);
-    const int jtype = type(j);
     const F_FLOAT rsq = delx*delx + dely*dely + delz*delz;
 
     if (rsq < cut_coulsq) {
@@ -431,7 +422,10 @@ int PairCoulWolfKokkos<DeviceType>::sbmask(const int& j) const {
   return j >> SBBITS & 3;
 }
 
+namespace LAMMPS_NS {
 template class PairCoulWolfKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class PairCoulWolfKokkos<LMPHostType>;
 #endif
+}
+

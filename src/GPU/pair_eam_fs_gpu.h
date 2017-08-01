@@ -33,6 +33,7 @@ public:
   void init_style();
   double single(int, int, int, int, double, double, double, double &);
   double memory_usage();
+  void *extract(const char *, int &) { return NULL; }
 
   int pack_forward_comm(int, int *, double *, int, int *);
   void unpack_forward_comm(int, int, double *);
@@ -55,6 +56,15 @@ public:
 #endif
 
 /* ERROR/WARNING messages:
+
+E: Insufficient memory on accelerator
+
+There is insufficient memory on one of the devices specified for the gpu
+package
+
+E: Cannot use newton pair with eam/fs/gpu pair style
+
+Self-explanatory.
 
 E: Incorrect args for pair coefficients
 

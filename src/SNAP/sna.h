@@ -31,7 +31,7 @@ struct SNA_LOOPINDICES {
 class SNA : protected Pointers {
 
 public:
-  SNA(LAMMPS*, double, int, int, int, double, int);
+  SNA(LAMMPS*, double, int, int, int, double, int, int);
 
   SNA(LAMMPS* lmp) : Pointers(lmp) {};
   ~SNA();
@@ -101,7 +101,7 @@ private:
   double**** duarray_r, **** duarray_i;
   double**** dbarray;
 
-  static const int nmaxfactorial = 167; 
+  static const int nmaxfactorial = 167;
   static const double nfac_table[];
   double factorial(int);
 
@@ -139,6 +139,8 @@ private:
   // Self-weight
   double wself;
 
+  int bzero_flag; // 1 if bzero subtracted from barray
+  double *bzero;  // array of B values for isolated atoms
 };
 
 }

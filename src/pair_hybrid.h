@@ -31,6 +31,7 @@ class PairHybrid : public Pair {
   friend class FixOMP;
   friend class Force;
   friend class Respa;
+  friend class Info;
  public:
   PairHybrid(class LAMMPS *);
   virtual ~PairHybrid();
@@ -39,6 +40,7 @@ class PairHybrid : public Pair {
   virtual void coeff(int, char **);
   void init_style();
   double init_one(int, int);
+  void setup();
   void write_restart(FILE *);
   void read_restart(FILE *);
   double single(int, int, int, int, double, double, double, double &);
@@ -52,6 +54,9 @@ class PairHybrid : public Pair {
   void reset_dt();
 
   int check_ijtype(int, int, char *);
+
+  virtual void add_tally_callback(class Compute *);
+  virtual void del_tally_callback(class Compute *);
 
  protected:
   int nstyles;                  // # of sub-styles
@@ -67,6 +72,7 @@ class PairHybrid : public Pair {
   int ***map;                   // list of sub-styles itype,jtype points to
   double **special_lj;          // list of per style LJ exclusion factors
   double **special_coul;        // list of per style Coulomb exclusion factors
+  int *compute_tally;           // list of on/off flags for tally computes
 
   void allocate();
   void flags();
@@ -75,8 +81,6 @@ class PairHybrid : public Pair {
   double *save_special();
   void set_special(int);
   void restore_special(double *);
-
-  virtual void modify_requests();
 };
 
 }
@@ -85,6 +89,10 @@ class PairHybrid : public Pair {
 #endif
 
 /* ERROR/WARNING messages:
+
+E: Cannot yet use pair hybrid with Kokkos
+
+This feature is not yet supported.
 
 E: Illegal ... command
 
@@ -113,6 +121,11 @@ E: Pair hybrid sub-style is not used
 No pair_coeff command used a sub-style specified in the pair_style
 command.
 
+E: Pair_modify special setting for pair hybrid incompatible with global special_bonds setting
+
+Cannot override a setting of 0.0 or 1.0 or change a setting between
+0.0 and 1.0.
+
 E: All pair coeffs are not set
 
 All pair coefficients must be set in the data file or by the
@@ -128,6 +141,10 @@ E: Pair hybrid sub-style does not support single call
 
 You are attempting to invoke a single() call on a pair style
 that doesn't support it.
+
+E: Pair hybrid single calls do not support per sub-style special bond values
+
+Self-explanatory.
 
 E: Unknown pair_modify hybrid sub-style
 

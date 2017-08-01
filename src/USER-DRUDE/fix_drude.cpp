@@ -19,14 +19,14 @@
 #include "modify.h"
 #include "error.h"
 #include "memory.h"
+#include "molecule.h"
+#include "atom_vec.h"
 
 #include <set>
 #include <vector>
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
-
-FixDrude *FixDrude::sptr = NULL;
 
 /* ---------------------------------------------------------------------- */
 
@@ -38,6 +38,7 @@ FixDrude::FixDrude(LAMMPS *lmp, int narg, char **arg) :
   comm_border = 1; // drudeid
   special_alter_flag = 1;
   create_attribute = 1;
+  is_reduced = false;
 
   memory->create(drudetype, atom->ntypes+1, "fix_drude::drudetype");
   for (int i=3; i<narg; i++) {
@@ -108,20 +109,44 @@ void FixDrude::build_drudeid(){
   std::vector<tagint> core_drude_vec;
   partner_set = new std::set<tagint>[nlocal]; // Temporary sets of bond partner tags
 
-  sptr = this;
-  // Build list of my atoms' bond partners
-  for (int i=0; i<nlocal; i++){
-    if (drudetype[type[i]] == NOPOL_TYPE) continue;
-    drudeid[i] = 0;
-    for (int k=0; k<atom->num_bond[i]; k++){
-      core_drude_vec.push_back(atom->tag[i]);
-      core_drude_vec.push_back(atom->bond_atom[i][k]);
+  if (atom->molecular == 1)
+  {
+    // Build list of my atoms' bond partners
+    for (int i=0; i<nlocal; i++){
+      if (drudetype[type[i]] == NOPOL_TYPE) continue;
+      drudeid[i] = 0;
+      for (int k=0; k<atom->num_bond[i]; k++){
+        core_drude_vec.push_back(atom->tag[i]);
+        core_drude_vec.push_back(atom->bond_atom[i][k]);
+      }
+    }
+  }
+  else
+  {
+    // Template case
+    class Molecule **atommols;
+    atommols = atom->avec->onemols;
+
+    // Build list of my atoms' bond partners
+    for (int i=0; i<nlocal; i++){
+      int imol = atom->molindex[i];
+      int iatom = atom->molatom[i];
+      tagint *batom = atommols[imol]->bond_atom[iatom];
+      tagint tagprev = atom->tag[i] - iatom - 1;
+      int nbonds = atommols[imol]->num_bond[iatom];
+
+      if (drudetype[type[i]] == NOPOL_TYPE) continue;
+      drudeid[i] = 0;
+      for (int k=0; k<nbonds; k++){
+        core_drude_vec.push_back(atom->tag[i]);
+        core_drude_vec.push_back(batom[k]+tagprev);
+      }
     }
   }
   // Loop on procs to fill my atoms' sets of bond partners
   comm->ring(core_drude_vec.size(), sizeof(tagint),
              (char *) core_drude_vec.data(),
-             4, ring_build_partner, NULL, 1);
+             4, ring_build_partner, NULL, (void *)this, 1);
 
   // Build the list of my Drudes' tags
   // The only bond partners of a Drude particle is its core,
@@ -137,7 +162,7 @@ void FixDrude::build_drudeid(){
   // so that each core finds its Drude.
   comm->ring(drude_vec.size(), sizeof(tagint),
              (char *) drude_vec.data(),
-             3, ring_search_drudeid, NULL, 1);
+             3, ring_search_drudeid, NULL, (void *)this, 1);
   delete [] partner_set;
 }
 
@@ -146,14 +171,15 @@ void FixDrude::build_drudeid(){
  * Look in my cores' bond partner tags if there is a Drude tag.
  * If so fill this core's dureid.
 ------------------------------------------------------------------------- */
-void FixDrude::ring_search_drudeid(int size, char *cbuf){
+void FixDrude::ring_search_drudeid(int size, char *cbuf, void *ptr){
   // Search for the drude partner of my cores
-  Atom *atom = sptr->atom;
+  FixDrude *fdptr = (FixDrude *) ptr;
+  Atom *atom = fdptr->atom;
   int nlocal = atom->nlocal;
   int *type = atom->type;
-  std::set<tagint> *partner_set = sptr->partner_set;
-  tagint *drudeid = sptr->drudeid;
-  int *drudetype = sptr->drudetype;
+  std::set<tagint> *partner_set = fdptr->partner_set;
+  tagint *drudeid = fdptr->drudeid;
+  int *drudetype = fdptr->drudetype;
 
   tagint *first = (tagint *) cbuf;
   tagint *last = first + size;
@@ -175,11 +201,12 @@ void FixDrude::ring_search_drudeid(int size, char *cbuf){
  * buffer contains bond partners. Look for my atoms and add their partner's
  * tag in its set of bond partners.
 ------------------------------------------------------------------------- */
-void FixDrude::ring_build_partner(int size, char *cbuf){
+void FixDrude::ring_build_partner(int size, char *cbuf, void *ptr){
   // Add partners from incoming list
-  Atom *atom = sptr->atom;
+  FixDrude *fdptr = (FixDrude *) ptr;
+  Atom *atom = fdptr->atom;
   int nlocal = atom->nlocal;
-  std::set<tagint> *partner_set = sptr->partner_set;
+  std::set<tagint> *partner_set = fdptr->partner_set;
   tagint *it = (tagint *) cbuf;
   tagint *last = it + size;
 
@@ -275,6 +302,9 @@ void FixDrude::rebuild_special(){
   tagint **special = atom->special;
   int *type = atom->type;
 
+  if (atom->molecular != 1)
+    return;
+
   // Make sure that drude partners know each other
   //build_drudeid();
 
@@ -307,11 +337,11 @@ void FixDrude::rebuild_special(){
   // Remove Drude particles from the special lists of each proc
   comm->ring(drude_vec.size(), sizeof(tagint),
              (char *) drude_vec.data(),
-             9, ring_remove_drude, NULL, 1);
+             9, ring_remove_drude, NULL, (void *)this, 1);
   // Add back Drude particles in the lists just after their core
   comm->ring(core_drude_vec.size(), sizeof(tagint),
              (char *) core_drude_vec.data(),
-             10, ring_add_drude, NULL, 1);
+             10, ring_add_drude, NULL, (void *)this, 1);
 
   // Check size of special list
   nspecmax_loc = 0;
@@ -342,16 +372,17 @@ void FixDrude::rebuild_special(){
   // Copy core's list into their drude list
   comm->ring(core_special_vec.size(), sizeof(tagint),
              (char *) core_special_vec.data(),
-             11, ring_copy_drude, NULL, 1);
+             11, ring_copy_drude, NULL, (void *)this, 1);
 }
 
 /* ----------------------------------------------------------------------
  * When receive buffer, build a set of drude tags, look into my atoms'
  * special list if some tags are drude particles. If so, remove it.
 ------------------------------------------------------------------------- */
-void FixDrude::ring_remove_drude(int size, char *cbuf){
+void FixDrude::ring_remove_drude(int size, char *cbuf, void *ptr){
   // Remove all drude particles from special list
-  Atom *atom = sptr->atom;
+  FixDrude *fdptr = (FixDrude *) ptr;
+  Atom *atom = fdptr->atom;
   int nlocal = atom->nlocal;
   int **nspecial = atom->nspecial;
   tagint **special = atom->special;
@@ -359,7 +390,7 @@ void FixDrude::ring_remove_drude(int size, char *cbuf){
   tagint *first = (tagint *) cbuf;
   tagint *last = first + size;
   std::set<tagint> drude_set(first, last);
-  int *drudetype = sptr->drudetype;
+  int *drudetype = fdptr->drudetype;
 
   for (int i=0; i<nlocal; i++) {
     if (drudetype[type[i]] == DRUDE_TYPE) continue;
@@ -384,16 +415,17 @@ void FixDrude::ring_remove_drude(int size, char *cbuf){
  * Loop on my atoms' special list to find core tags. Insert their Drude
  * particle if they have one.
 ------------------------------------------------------------------------- */
-void FixDrude::ring_add_drude(int size, char *cbuf){
+void FixDrude::ring_add_drude(int size, char *cbuf, void *ptr){
   // Assume special array size is big enough
   // Add all particle just after their core in the special list
-  Atom *atom = sptr->atom;
+  FixDrude *fdptr = (FixDrude *) ptr;
+  Atom *atom = fdptr->atom;
   int nlocal = atom->nlocal;
   int **nspecial = atom->nspecial;
   tagint **special = atom->special;
   int *type = atom->type;
-  tagint *drudeid = sptr->drudeid;
-  int *drudetype = sptr->drudetype;
+  tagint *drudeid = fdptr->drudeid;
+  int *drudetype = fdptr->drudetype;
 
   tagint *first = (tagint *) cbuf;
   tagint *last = first + size;
@@ -440,15 +472,16 @@ void FixDrude::ring_add_drude(int size, char *cbuf){
  * in the buffer. Loop on my Drude particles and copy their special
  * info from that of their core if the latter is found in the map.
 ------------------------------------------------------------------------- */
-void FixDrude::ring_copy_drude(int size, char *cbuf){
+void FixDrude::ring_copy_drude(int size, char *cbuf, void *ptr){
   // Copy special list of drude from its core (except itself)
-  Atom *atom = sptr->atom;
+  FixDrude *fdptr = (FixDrude *) ptr;
+  Atom *atom = fdptr->atom;
   int nlocal = atom->nlocal;
   int **nspecial = atom->nspecial;
   tagint **special = atom->special;
   int *type = atom->type;
-  tagint *drudeid = sptr->drudeid;
-  int *drudetype = sptr->drudetype;
+  tagint *drudeid = fdptr->drudeid;
+  int *drudetype = fdptr->drudetype;
 
   tagint *first = (tagint *) cbuf;
   tagint *last = first + size;

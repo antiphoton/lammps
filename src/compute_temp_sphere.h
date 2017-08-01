@@ -34,12 +34,13 @@ class ComputeTempSphere : public Compute {
   void compute_vector();
 
   void remove_bias(int, double *);
+  void remove_bias_thr(int, double *, double *);
   void restore_bias(int, double *);
+  void restore_bias_thr(int, double *, double *);
 
  private:
   int mode;
   double tfactor;
-  double *inertia;
   char *id_bias;
   Compute *tbias;     // ptr to additional bias compute
 
@@ -79,5 +80,10 @@ E: Bias compute group does not match compute group
 
 The specified compute must operate on the same group as the parent
 compute.
+
+E: Temperature compute degrees of freedom < 0
+
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

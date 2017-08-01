@@ -28,11 +28,9 @@ FixStyle(rigid/small,FixRigidSmall)
 namespace LAMMPS_NS {
 
 class FixRigidSmall : public Fix {
+  friend class ComputeRigidLocal;
+
  public:
-  // static variable for ring communication callback to access class data
-
-  static FixRigidSmall *frsptr;
-
   FixRigidSmall(class LAMMPS *, int, char **);
   virtual ~FixRigidSmall();
   virtual int setmask();
@@ -61,6 +59,7 @@ class FixRigidSmall : public Fix {
   void pre_neighbor();
   int dof(int);
   void deform(int);
+  void enforce2d();
   void reset_dt();
   void zero_momentum();
   void zero_rotation();
@@ -128,6 +127,7 @@ class FixRigidSmall : public Fix {
   int extended;         // 1 if any particles have extended attributes
   int orientflag;       // 1 if particles store spatial orientation
   int dorientflag;      // 1 if particles store dipole orientation
+  int reinitflag;       // 1 if re-initialize rigid bodies between runs
 
   int POINT,SPHERE,ELLIPSOID,LINE,TRIANGLE,DIPOLE;   // bitmasks for eflags
   int OMEGA,ANGMOM,TORQUE;
@@ -196,9 +196,9 @@ class FixRigidSmall : public Fix {
 
   // callback functions for ring communication
 
-  static void ring_bbox(int, char *);
-  static void ring_nearest(int, char *);
-  static void ring_farthest(int, char *);
+  static void ring_bbox(int, char *, void *);
+  static void ring_nearest(int, char *, void *);
+  static void ring_farthest(int, char *, void *);
 
   // debug
 
@@ -256,7 +256,7 @@ NPT/NPH fix must be defined in input script after all rigid fixes,
 else the rigid fix contribution to the pressure virial is
 incorrect.
 
-W: Cannot count rigid body degrees-of-freedom before bodies are fully initialized h
+W: Cannot count rigid body degrees-of-freedom before bodies are fully initialized
 
 This means the temperature associated with the rigid bodies may be
 incorrect on this timestep.
@@ -271,6 +271,10 @@ not be accounted for.
 E: Fix rigid/small atom has non-zero image flag in a non-periodic dimension
 
 Image flags for non-periodic dimensions should not be set.
+
+E: One or more rigid bodies are a single particle
+
+Self-explanatory.
 
 E: Inconsistent use of finite-size particles by molecule template molecules
 

@@ -85,14 +85,21 @@ void Verlet::init()
    setup before run
 ------------------------------------------------------------------------- */
 
-void Verlet::setup()
+void Verlet::setup(int flag)
 {
   if (comm->me == 0 && screen) {
     fprintf(screen,"Setting up Verlet run ...\n");
-    fprintf(screen,"  Unit style  : %s\n", update->unit_style);
-    fprintf(screen,"  Current step: " BIGINT_FORMAT "\n", update->ntimestep);
-    fprintf(screen,"  Time step   : %g\n", update->dt);
+    if (flag) {
+      fprintf(screen,"  Unit style    : %s\n", update->unit_style);
+      fprintf(screen,"  Current step  : " BIGINT_FORMAT "\n",
+              update->ntimestep);
+      fprintf(screen,"  Time step     : %g\n", update->dt);
+      timer->print_timeout(screen);
+    }
   }
+
+  if (lmp->kokkos)
+    error->all(FLERR,"KOKKOS package requires run_style verlet/kk");
 
   update->setupflag = 1;
 
@@ -119,6 +126,7 @@ void Verlet::setup()
 
   // compute all forces
 
+  force->setup();
   ev_set(update->ntimestep);
   force_clear();
   modify->setup_pre_force(vflag);
@@ -139,11 +147,11 @@ void Verlet::setup()
     else force->kspace->compute_dummy(eflag,vflag);
   }
 
-  modify->pre_reverse(eflag,vflag);
+  modify->setup_pre_reverse(eflag,vflag);
   if (force->newton) comm->reverse_comm();
 
   modify->setup(vflag);
-  output->setup();
+  output->setup(flag);
   update->setupflag = 0;
 }
 
@@ -200,7 +208,7 @@ void Verlet::setup_minimal(int flag)
     else force->kspace->compute_dummy(eflag,vflag);
   }
 
-  modify->pre_reverse(eflag,vflag);
+  modify->setup_pre_reverse(eflag,vflag);
   if (force->newton) comm->reverse_comm();
 
   modify->setup(vflag);
@@ -228,6 +236,10 @@ void Verlet::run(int n)
   else sortflag = 0;
 
   for (int i = 0; i < n; i++) {
+    if (timer->check_timeout(i)) {
+      update->nsteps = i;
+      break;
+    }
 
     ntimestep = ++update->ntimestep;
     ev_set(ntimestep);

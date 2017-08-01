@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -90,7 +90,7 @@ public:
 private:
   enum { block_size = static_cast<unsigned>(sizeof(unsigned)*CHAR_BIT) };
   enum { block_mask = block_size-1u };
-  enum { block_shift = static_cast<int>(Impl::power_of_two<block_size>::value) };
+  enum { block_shift = Kokkos::Impl::integral_power_of_two(block_size) };
 
 public:
 
@@ -322,7 +322,7 @@ public:
 private:
   enum { block_size = static_cast<unsigned>(sizeof(unsigned)*CHAR_BIT) };
   enum { block_mask = block_size -1u };
-  enum { block_shift = static_cast<int>(Impl::power_of_two<block_size>::value) };
+  enum { block_shift = Kokkos::Impl::integral_power_of_two(block_size) };
 
 public:
   ConstBitset()
@@ -435,3 +435,4 @@ void deep_copy( ConstBitset<DstDevice> & dst, ConstBitset<SrcDevice> const& src)
 } // namespace Kokkos
 
 #endif //KOKKOS_BITSET_HPP
+

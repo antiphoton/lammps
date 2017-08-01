@@ -174,7 +174,7 @@ void PairCoulStreitz::coeff(int narg, char **arg)
   // read potential file and initialize potential parameters
 
   read_file(arg[2]);
-  setup();
+  setup_params();
   n = atom->ntypes;
 
   // clear setflag since coeff() called once with I,J = * *
@@ -206,7 +206,6 @@ void PairCoulStreitz::init_style()
   if (!atom->q_flag)
     error->all(FLERR,"Pair style coul/streitz requires atom attribute q");
 
-  //neighbor->request(this);
   int irequest = neighbor->request(this,instance_me);
   neighbor->requests[irequest]->half = 0;
   neighbor->requests[irequest]->full = 1;
@@ -353,7 +352,7 @@ void PairCoulStreitz::read_file(char *file)
 
 /* ---------------------------------------------------------------------- */
 
-void PairCoulStreitz::setup()
+void PairCoulStreitz::setup_params()
 {
   int i,m,n;
 

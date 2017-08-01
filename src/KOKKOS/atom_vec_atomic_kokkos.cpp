@@ -619,16 +619,16 @@ struct AtomVecAtomicKokkos_PackBorder {
           _buf(i,0) = _x(j,0);
           _buf(i,1) = _x(j,1);
           _buf(i,2) = _x(j,2);
-          _buf(i,3) = _tag(j);
-          _buf(i,4) = _type(j);
-          _buf(i,5) = _mask(j);
+          _buf(i,3) = d_ubuf(_tag(j)).d;
+          _buf(i,4) = d_ubuf(_type(j)).d;
+          _buf(i,5) = d_ubuf(_mask(j)).d;
       } else {
           _buf(i,0) = _x(j,0) + _dx;
           _buf(i,1) = _x(j,1) + _dy;
           _buf(i,2) = _x(j,2) + _dz;
-          _buf(i,3) = _tag(j);
-          _buf(i,4) = _type(j);
-          _buf(i,5) = _mask(j);
+          _buf(i,3) = d_ubuf(_tag(j)).d;
+          _buf(i,4) = d_ubuf(_type(j)).d;
+          _buf(i,5) = d_ubuf(_mask(j)).d;
       }
   }
 };
@@ -836,9 +836,9 @@ struct AtomVecAtomicKokkos_UnpackBorder {
       _x(i+_first,0) = _buf(i,0);
       _x(i+_first,1) = _buf(i,1);
       _x(i+_first,2) = _buf(i,2);
-      _tag(i+_first) = static_cast<int> (_buf(i,3));
-      _type(i+_first) = static_cast<int>  (_buf(i,4));
-      _mask(i+_first) = static_cast<int>  (_buf(i,5));
+      _tag(i+_first) = (tagint) d_ubuf(_buf(i,3)).i;
+      _type(i+_first) = (int) d_ubuf(_buf(i,4)).i;
+      _mask(i+_first) = (int) d_ubuf(_buf(i,5)).i;
 //      printf("%i %i %lf %lf %lf %i BORDER\n",_tag(i+_first),i+_first,_x(i+_first,0),_x(i+_first,1),_x(i+_first,2),_type(i+_first));
   }
 };
@@ -896,6 +896,7 @@ void AtomVecAtomicKokkos::unpack_border_vel(int n, int first, double *buf)
   last = first + n;
   for (i = first; i < last; i++) {
     if (i == nmax) grow(0);
+    modified(Host,X_MASK|V_MASK|TAG_MASK|TYPE_MASK|MASK_MASK);
     h_x(i,0) = buf[m++];
     h_x(i,1) = buf[m++];
     h_x(i,2) = buf[m++];
@@ -976,10 +977,10 @@ struct AtomVecAtomicKokkos_PackExchangeFunctor {
     _buf(mysend,4) = _v(i,0);
     _buf(mysend,5) = _v(i,1);
     _buf(mysend,6) = _v(i,2);
-    _buf(mysend,7) = _tag[i];
-    _buf(mysend,8) = _type[i];
-    _buf(mysend,9) = _mask[i];
-    _buf(mysend,10) = _image[i];
+    _buf(mysend,7) = d_ubuf(_tag[i]).d;
+    _buf(mysend,8) = d_ubuf(_type[i]).d;
+    _buf(mysend,9) = d_ubuf(_mask[i]).d;
+    _buf(mysend,10) = d_ubuf(_image[i]).d;
     const int j = _copylist(mysend);
 
     if(j>-1) {
@@ -1090,10 +1091,10 @@ struct AtomVecAtomicKokkos_UnpackExchangeFunctor {
       _v(i,0) = _buf(myrecv,4);
       _v(i,1) = _buf(myrecv,5);
       _v(i,2) = _buf(myrecv,6);
-      _tag[i] = _buf(myrecv,7);
-      _type[i] = _buf(myrecv,8);
-      _mask[i] = _buf(myrecv,9);
-      _image[i] = _buf(myrecv,10);
+      _tag[i] = (tagint) d_ubuf(_buf(myrecv,7)).i;
+      _type[i] = (int) d_ubuf(_buf(myrecv,8)).i;
+      _mask[i] = (int) d_ubuf(_buf(myrecv,9)).i;
+      _image[i] = (imageint) d_ubuf(_buf(myrecv,10)).i;
     }
   }
 };
@@ -1231,7 +1232,7 @@ int AtomVecAtomicKokkos::unpack_restart(double *buf)
 
   double **extra = atom->extra;
   if (atom->nextra_store) {
-    int size = static_cast<int> (ubuf(buf[m++]).i) - m;
+    int size = static_cast<int> (buf[0]) - m;
     for (int i = 0; i < size; i++) extra[nlocal][i] = buf[m++];
   }
 
@@ -1296,6 +1297,8 @@ void AtomVecAtomicKokkos::data_atom(double *coord, tagint imagetmp,
   h_v(nlocal,0) = 0.0;
   h_v(nlocal,1) = 0.0;
   h_v(nlocal,2) = 0.0;
+
+  atomKK->modified(Host,ALL_MASK);
 
   atom->nlocal++;
 }
@@ -1375,6 +1378,43 @@ void AtomVecAtomicKokkos::sync(ExecutionSpace space, unsigned int mask)
 
 /* ---------------------------------------------------------------------- */
 
+void AtomVecAtomicKokkos::sync_overlapping_device(ExecutionSpace space, unsigned int mask)
+{
+  if (space == Device) {
+    if ((mask & X_MASK) && atomKK->k_x.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_x_array>(atomKK->k_x,space);
+    if ((mask & V_MASK) && atomKK->k_v.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_v_array>(atomKK->k_v,space);
+    if ((mask & F_MASK) && atomKK->k_f.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_f_array>(atomKK->k_f,space);
+    if ((mask & TAG_MASK) && atomKK->k_tag.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_tag,space);
+    if ((mask & TYPE_MASK) && atomKK->k_type.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_type,space);
+    if ((mask & MASK_MASK) && atomKK->k_mask.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_mask,space);
+    if ((mask & IMAGE_MASK) && atomKK->k_image.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_imageint_1d>(atomKK->k_image,space);
+  } else {
+    if ((mask & X_MASK) && atomKK->k_x.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_x_array>(atomKK->k_x,space);
+    if ((mask & V_MASK) && atomKK->k_v.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_v_array>(atomKK->k_v,space);
+    if ((mask & F_MASK) && atomKK->k_f.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_f_array>(atomKK->k_f,space);
+    if ((mask & TAG_MASK) && atomKK->k_tag.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_tag,space);
+    if ((mask & TYPE_MASK) && atomKK->k_type.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_type,space);
+    if ((mask & MASK_MASK) && atomKK->k_mask.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_mask,space);
+    if ((mask & IMAGE_MASK) && atomKK->k_image.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_imageint_1d>(atomKK->k_image,space);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
 void AtomVecAtomicKokkos::modified(ExecutionSpace space, unsigned int mask)
 {
   if (space == Device) {
@@ -1395,3 +1435,4 @@ void AtomVecAtomicKokkos::modified(ExecutionSpace space, unsigned int mask)
     if (mask & IMAGE_MASK) atomKK->k_image.modify<LMPHostType>();
   }
 }
+

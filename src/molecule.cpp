@@ -16,6 +16,7 @@
 #include "molecule.h"
 #include "atom.h"
 #include "atom_vec.h"
+#include "atom_vec_body.h"
 #include "force.h"
 #include "comm.h"
 #include "domain.h"
@@ -36,7 +37,16 @@ using namespace MathConst;
 /* ---------------------------------------------------------------------- */
 
 Molecule::Molecule(LAMMPS *lmp, int narg, char **arg, int &index) :
-  Pointers(lmp)
+  Pointers(lmp), id(NULL), x(NULL), type(NULL), q(NULL), radius(NULL),
+  rmass(NULL), num_bond(NULL), bond_type(NULL), bond_atom(NULL),
+  num_angle(NULL), angle_type(NULL), angle_atom1(NULL), angle_atom2(NULL),
+  angle_atom3(NULL), num_dihedral(NULL), dihedral_type(NULL), dihedral_atom1(NULL),
+  dihedral_atom2(NULL), dihedral_atom3(NULL), dihedral_atom4(NULL), num_improper(NULL),
+  improper_type(NULL), improper_atom1(NULL), improper_atom2(NULL),
+  improper_atom3(NULL), improper_atom4(NULL), nspecial(NULL), special(NULL),
+  shake_flag(NULL), shake_atom(NULL), shake_type(NULL), avec_body(NULL), ibodyparams(NULL),
+  dbodyparams(NULL), dx(NULL), dxcom(NULL), dxbody(NULL), quat_external(NULL),
+  fp(NULL), count(NULL)
 {
   me = comm->me;
 
@@ -163,7 +173,8 @@ Molecule::~Molecule()
    compute center = geometric center of molecule
    also compute:
      dx = displacement of each atom from center
-     molradius = radius of molecule from center including finite-size particles
+     molradius = radius of molecule from center 
+       including finite-size particles or body particles
 ------------------------------------------------------------------------- */
 
 void Molecule::compute_center()
@@ -208,7 +219,7 @@ void Molecule::compute_mass()
   if (massflag) return;
   massflag = 1;
 
-  if (!rmassflag) atom->check_mass();
+  atom->check_mass(FLERR);
 
   masstotal = 0.0;
   for (int i = 0; i < natoms; i++) {
@@ -232,7 +243,7 @@ void Molecule::compute_com()
   if (!comflag) {
     comflag = 1;
 
-    if (!rmassflag) atom->check_mass();
+    atom->check_mass(FLERR);
 
     double onemass;
     com[0] = com[1] = com[2] = 0.0;
@@ -243,9 +254,11 @@ void Molecule::compute_com()
       com[1] += x[i][1]*onemass;
       com[2] += x[i][2]*onemass;
     }
-    com[0] /= masstotal;
-    com[1] /= masstotal;
-    com[2] /= masstotal;
+    if (masstotal > 0.0) {
+      com[0] /= masstotal;
+      com[1] /= masstotal;
+      com[2] /= masstotal;
+    }
   }
 
   memory->destroy(dxcom);
@@ -295,13 +308,13 @@ void Molecule::compute_inertia()
   if (!inertiaflag) {
     inertiaflag = 1;
 
-    if (!rmassflag) atom->check_mass();
+    atom->check_mass(FLERR);
 
     double onemass,dx,dy,dz;
     for (int i = 0; i < 6; i++) itensor[i] = 0.0;
     for (int i = 0; i < natoms; i++) {
       if (rmassflag) onemass = rmass[i];
-      else onemass = atom->type[type[i]];
+      else onemass = atom->mass[type[i]];
       dx = dxcom[i][0];
       dy = dxcom[i][1];
       dz = dxcom[i][2];
@@ -316,7 +329,7 @@ void Molecule::compute_inertia()
     if (radiusflag) {
       for (int i = 0; i < natoms; i++) {
         if (rmassflag) onemass = rmass[i];
-        else onemass = atom->type[type[i]];
+        else onemass = atom->mass[type[i]];
         itensor[0] += SINERTIA*onemass * radius[i]*radius[i];
         itensor[1] += SINERTIA*onemass * radius[i]*radius[i];
         itensor[2] += SINERTIA*onemass * radius[i]*radius[i];
@@ -446,13 +459,21 @@ void Molecule::read(int flag)
       itensor[4] *= sizescale*sizescale*sizescale*sizescale*sizescale;
       itensor[5] *= sizescale*sizescale*sizescale*sizescale*sizescale;
     }
+    else if (strstr(line,"body")) {
+      bodyflag = 1;
+      avec_body = (AtomVecBody *) atom->style_match("body");
+      if (!avec_body) 
+        error->all(FLERR,"Molecule file requires atom style body");
+      sscanf(line,"%d %d",&nibody,&ndbody);
+    }
 
     else break;
   }
 
   // error checks
 
-  if (natoms < 1) error->all(FLERR,"No or invalid atom count in molecule file");
+  if (natoms < 1) 
+    error->all(FLERR,"No count or invalid atom count in molecule file");
   if (nbonds < 0) error->all(FLERR,"Invalid bond count in molecule file");
   if (nangles < 0) error->all(FLERR,"Invalid angle count in molecule file");
   if (ndihedrals < 0)
@@ -542,6 +563,19 @@ void Molecule::read(int flag)
       if (flag) shaketype_read(line);
       else skip_lines(natoms,line);
 
+    } else if (strcmp(keyword,"Body Integers") == 0) {
+      if (bodyflag == 0 || nibody == 0)
+	error->all(FLERR,"Molecule file has body params "
+                   "but no setting for them");
+      ibodyflag = 1;
+      body(flag,0,line);
+    } else if (strcmp(keyword,"Body Doubles") == 0) {
+      if (bodyflag == 0 || ndbody == 0)
+	error->all(FLERR,"Molecule file has body params "
+                   "but no setting for them");
+      dbodyflag = 1;
+      body(flag,1,line);
+
     } else error->one(FLERR,"Unknown section in molecule file");
 
     parse_keyword(1,line,keyword);
@@ -560,15 +594,41 @@ void Molecule::read(int flag)
       error->all(FLERR,"Molecule file has special flags but no bonds");
     if ((shakeflagflag || shakeatomflag || shaketypeflag) && !shakeflag)
       error->all(FLERR,"Molecule file shake info is incomplete");
+    if (bodyflag && nibody && ibodyflag == 0)
+      error->all(FLERR,"Molecule file has no Body Integers section");
+    if (bodyflag && ndbody && dbodyflag == 0)
+      error->all(FLERR,"Molecule file has no Body Doubles section");
   }
 
-  // auto-generate special bonds
+  // auto-generate special bonds if needed and not in file
+  // set maxspecial on first pass, so allocate() has a size
 
-  if (bondflag && !specialflag) {
-    specialflag = 1;
-    nspecialflag = 1;
+  if (bondflag && specialflag == 0) {
+    if (domain->box_exist == 0)
+      error->all(FLERR,"Cannot auto-generate special bonds before "
+                       "simulation box is defined");
+
     maxspecial = atom->maxspecial;
-    if (flag) special_generate();
+    if (flag) {
+      special_generate();
+      specialflag = 1;
+      nspecialflag = 1;
+    }
+  }
+
+  // body particle must have natom = 1
+  // set radius by having body class compute its own radius
+  
+  if (bodyflag) {
+    radiusflag = 1;
+    if (natoms != 1) 
+      error->all(FLERR,"Molecule natoms must be 1 for body particle");
+    if (sizescale != 1.0)
+      error->all(FLERR,"Molecule sizescale must be 1.0 for body particle");
+    if (flag) {
+      radius[0] = avec_body->radius_body(nibody,ndbody,ibodyparams,dbodyparams);
+      maxradius = radius[0];
+    }
   }
 }
 
@@ -1104,7 +1164,7 @@ void Molecule::special_generate()
         atom1 = i;
         atom2 = bond_atom[i][j];
         if (count[atom1] >= maxspecial)
-          error->one(FLERR,"");
+          error->one(FLERR,"Molecule auto special bond generation overflow");
         special[i][count[atom1]++] = atom2;
       }
     }
@@ -1127,7 +1187,7 @@ void Molecule::special_generate()
         }
         if (!dedup) {
           if (count[i] >= maxspecial)
-            error->one(FLERR,"");
+            error->one(FLERR,"Molecule auto special bond generation overflow");
           special[i][count[i]++] = special[special[i][m]-1][j];
           nspecial[i][1]++;
         }
@@ -1151,7 +1211,7 @@ void Molecule::special_generate()
         }
         if (!dedup) {
           if (count[i] >= maxspecial)
-            error->one(FLERR,"");
+            error->one(FLERR,"Molecule auto special bond generation overflow");
           special[i][count[i]++] = special[special[i][m]-1][j];
           nspecial[i][2]++;
         }
@@ -1245,6 +1305,44 @@ void Molecule::shaketype_read(char *line)
 }
 
 /* ----------------------------------------------------------------------
+   read body params from file
+   pflag = 0/1 for integer/double params
+------------------------------------------------------------------------- */
+
+void Molecule::body(int flag, int pflag, char *line)
+{
+  int i,ncount;
+
+  int nparam = nibody;
+  if (pflag) nparam = ndbody;
+
+  int nword = 0;
+  while (nword < nparam) {
+    readline(line);
+
+    ncount = atom->count_words(line);
+    if (ncount == 0)
+      error->one(FLERR,"Too few values in body section of molecule file");
+    if (nword+ncount > nparam) 
+      error->all(FLERR,"Too many values in body section of molecule file");
+    
+    if (flag) {
+      if (pflag == 0) {
+        ibodyparams[nword++] = force->inumeric(FLERR,strtok(line," \t\n\r\f"));
+        for (i = 1; i < ncount; i++)
+          ibodyparams[nword++] = 
+            force->inumeric(FLERR,strtok(NULL," \t\n\r\f"));
+      } else {
+        dbodyparams[nword++] = force->numeric(FLERR,strtok(line," \t\n\r\f"));
+        for (i = 1; i < ncount; i++)
+          dbodyparams[nword++] = 
+            force->numeric(FLERR,strtok(NULL," \t\n\r\f"));
+      }
+    } else nword += ncount;
+  }
+}
+
+/* ----------------------------------------------------------------------
    error check molecule attributes and topology against system settings
    flag = 0, just check this molecule
    flag = 1, check all molecules in set, this is 1st molecule in set
@@ -1297,7 +1395,7 @@ void Molecule::check_attributes(int flag)
       if (atom->maxspecial < onemol->maxspecial) mismatch = 1;
 
       if (mismatch)
-        error->all(FLERR,"Molecule toplogy/atom exceeds system topology/atom");
+        error->all(FLERR,"Molecule topology/atom exceeds system topology/atom");
     }
 
     // warn if molecule topology defined but no special settings
@@ -1318,6 +1416,7 @@ void Molecule::initialize()
   nbonds = nangles = ndihedrals = nimpropers = 0;
   ntypes = 0;
   nbondtypes = nangletypes = ndihedraltypes = nimpropertypes = 0;
+  nibody = ndbody = 0;
 
   bond_per_atom = angle_per_atom = dihedral_per_atom = improper_per_atom = 0;
   maxspecial = 0;
@@ -1326,6 +1425,7 @@ void Molecule::initialize()
   bondflag = angleflag = dihedralflag = improperflag = 0;
   nspecialflag = specialflag = 0;
   shakeflag = shakeflagflag = shakeatomflag = shaketypeflag = 0;
+  bodyflag = ibodyflag = dbodyflag = 0;
 
   centerflag = massflag = comflag = inertiaflag = 0;
   tag_require = 0;
@@ -1358,6 +1458,9 @@ void Molecule::initialize()
   shake_flag = NULL;
   shake_atom = NULL;
   shake_type = NULL;
+
+  ibodyparams = NULL;
+  dbodyparams = NULL;
 
   dx = NULL;
   dxcom = NULL;
@@ -1445,6 +1548,11 @@ void Molecule::allocate()
     memory->create(shake_atom,natoms,4,"molecule:shake_flag");
     memory->create(shake_type,natoms,3,"molecule:shake_flag");
   }
+
+  if (bodyflag) {
+    if (nibody) memory->create(ibodyparams,nibody,"molecule:ibodyparams");
+    if (ndbody) memory->create(dbodyparams,ndbody,"molecule:dbodyparams");
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -1493,6 +1601,9 @@ void Molecule::deallocate()
   memory->destroy(dx);
   memory->destroy(dxcom);
   memory->destroy(dxbody);
+
+  memory->destroy(ibodyparams);
+  memory->destroy(dbodyparams);
 }
 
 /* ----------------------------------------------------------------------

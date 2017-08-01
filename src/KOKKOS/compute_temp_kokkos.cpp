@@ -44,6 +44,7 @@ template<class DeviceType>
 double ComputeTempKokkos<DeviceType>::compute_scalar()
 {
   atomKK->sync(execution_space,datamask_read);
+  atomKK->k_mass.sync<DeviceType>();
 
   invoked_scalar = update->ntimestep;
 
@@ -62,7 +63,6 @@ double ComputeTempKokkos<DeviceType>::compute_scalar()
     Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagComputeTempScalar<1> >(0,nlocal),*this,t_kk);
   else
     Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagComputeTempScalar<0> >(0,nlocal),*this,t_kk);
-  DeviceType::fence();
   copymode = 0;
 
   t = t_kk.t0; // could make this more efficient
@@ -72,6 +72,7 @@ double ComputeTempKokkos<DeviceType>::compute_scalar()
   if (dof < 0.0 && natoms_temp > 0.0)
     error->all(FLERR,"Temperature compute degrees of freedom < 0");
   scalar *= tfactor;
+
   return scalar;
 }
 
@@ -116,7 +117,6 @@ void ComputeTempKokkos<DeviceType>::compute_vector()
     Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagComputeTempVector<1> >(0,nlocal),*this,t_kk);
   else
     Kokkos::parallel_reduce(Kokkos::RangePolicy<DeviceType, TagComputeTempVector<0> >(0,nlocal),*this,t_kk);
-  DeviceType::fence();
   copymode = 0;
 
   t[0] = t_kk.t0;
@@ -147,7 +147,10 @@ void ComputeTempKokkos<DeviceType>::operator()(TagComputeTempVector<RMASS>, cons
   }
 }
 
+namespace LAMMPS_NS {
 template class ComputeTempKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class ComputeTempKokkos<LMPHostType>;
 #endif
+}
+

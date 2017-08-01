@@ -80,6 +80,7 @@ class Comm : protected Pointers {
   virtual void reverse_comm_pair(class Pair *) = 0;
   virtual void forward_comm_fix(class Fix *, int size=0) = 0;
   virtual void reverse_comm_fix(class Fix *, int size=0) = 0;
+  virtual void reverse_comm_fix_variable(class Fix *) = 0;
   virtual void forward_comm_compute(class Compute *) = 0;
   virtual void reverse_comm_compute(class Compute *) = 0;
   virtual void forward_comm_dump(class Dump *) = 0;
@@ -104,8 +105,8 @@ class Comm : protected Pointers {
 
   // non-virtual functions common to all Comm styles
 
-  void ring(int, int, void *, int, void (*)(int, char *),
-            void *, int self = 1);
+  void ring(int, int, void *, int, void (*)(int, char *, void *),
+            void *, void *, int self = 1);
   int read_lines_from_file(FILE *, int, int, char *);
   int read_lines_from_file_universe(FILE *, int, int, char *);
 
@@ -147,7 +148,7 @@ class Comm : protected Pointers {
 W: OMP_NUM_THREADS environment is not set.
 
 This environment variable must be set appropriately to use the
-USER-OMP pacakge.
+USER-OMP package.
 
 E: Illegal ... command
 
@@ -163,9 +164,21 @@ E: Comm_modify group != atom_modify first group
 
 Self-explanatory.
 
+E: Use cutoff/multi keyword to set cutoff in multi mode
+
+Mode is multi so cutoff keyword cannot be used.
+
 E: Invalid cutoff in comm_modify command
 
 Specified cutoff must be >= 0.0.
+
+E: Use cutoff keyword to set cutoff in single mode
+
+Mode is single so cutoff/multi keyword cannot be used.
+
+E: Cannot set cutoff/multi before simulation box is defined
+
+Self-explanatory.
 
 E: Specified processors != physical processors
 

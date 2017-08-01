@@ -33,7 +33,6 @@ class FixQEq : public Fix {
   void setup_pre_force(int);
   void setup_pre_force_respa(int, int);
   void pre_force_respa(int, int, int);
-  void min_setup_pre_force(int);
   void min_pre_force(int);
 
   // derived child classes must provide these functions
@@ -101,6 +100,9 @@ class FixQEq : public Fix {
   // damped dynamics
 
   double *qf, *q1, *q2, qdamp, qstep;
+
+  // fire
+  double *qv;
 
   void calculate_Q();
 

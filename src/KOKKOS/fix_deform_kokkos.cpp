@@ -49,6 +49,7 @@ enum{NO_REMAP,X_REMAP,V_REMAP};
 
 FixDeformKokkos::FixDeformKokkos(LAMMPS *lmp, int narg, char **arg) : FixDeform(lmp, narg, arg)
 {
+  kokkosable = 1;
   domainKK = (DomainKokkos *) domain;
 
   datamask_read = EMPTY_MASK;
@@ -371,4 +372,5 @@ void FixDeformKokkos::end_of_step()
 
   if (kspace_flag) force->kspace->setup();
 }
+
 

@@ -42,9 +42,11 @@ class PairAIREBO : public Pair {
   int *map;                        // 0 (C), 1 (H), or -1 (NULL) for each type
 
   int me;
-  int ljflag,torflag;              // 0/1 if LJ,torsion terms included
+  int ljflag,torflag;              // 0/1 if LJ/Morse,torsion terms included
+  int morseflag;                   // 1 if Morse instead of LJ for non-bonded
 
   double cutlj;                    // user-specified LJ cutoff
+  double sigcut,sigwid,sigmin;     // corresponding cutoff function
   double cutljrebosq;              // cut for when to compute
                                    // REBO neighs of ghost atoms
 
@@ -68,6 +70,10 @@ class PairAIREBO : public Pair {
   double rcLJmin[2][2],rcLJmax[2][2],rcLJmaxsq[2][2],bLJmin[2][2],bLJmax[2][2];
   double epsilon[2][2],sigma[2][2],epsilonT[2][2];
 
+  // parameters for Morse variant
+
+  double epsilonM[2][2],alphaM[2][2],reqM[2][2];
+
   // spline coefficients
 
   double gCdom[5],gC1[4][6],gC2[4][6],gHdom[4],gH[3][6];
@@ -78,6 +84,7 @@ class PairAIREBO : public Pair {
 
   // spline knot values
 
+  double PCCf_2_0;
   double PCCf[5][5],PCCdfdx[5][5],PCCdfdy[5][5],PCHf[5][5];
   double PCHdfdx[5][5],PCHdfdy[5][5];
   double piCCf[5][5][11],piCCdfdx[5][5][11];
@@ -107,6 +114,12 @@ class PairAIREBO : public Pair {
   double Sp5th(double, double *, double *);
   double Spbicubic(double, double, double *, double *);
   double Sptricubic(double, double, double, double *, double *);
+  void Sptricubic_patch_adjust(double *, double, double, char);
+  void Sptricubic_patch_coeffs(double, double, double, double, double, double,
+                               double*, double*, double*, double*, double*);
+  void Spbicubic_patch_adjust(double *, double, double, char);
+  void Spbicubic_patch_coeffs(double, double, double, double, double *,
+                              double *, double *, double *);
   void spline_init();
 
   void allocate();

@@ -15,6 +15,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <signal.h>
+#include <unistd.h>
 #include "kokkos.h"
 #include "lammps.h"
 #include "force.h"
@@ -31,8 +33,15 @@ KokkosLMP::KokkosLMP(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
   kokkos_exists = 1;
   lmp->kokkos = this;
 
+  auto_sync = 1;
+
+  int me = 0;
+  MPI_Comm_rank(world,&me);
+  if (me == 0) error->message(FLERR,"KOKKOS mode is enabled");
+
   // process any command-line args that invoke Kokkos settings
 
+  ngpu = 0;
   int device = 0;
   num_threads = 1;
   numa = 1;
@@ -46,8 +55,11 @@ KokkosLMP::KokkosLMP(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
 
     } else if (strcmp(arg[iarg],"g") == 0 ||
                strcmp(arg[iarg],"gpus") == 0) {
+#ifndef KOKKOS_HAVE_CUDA
+      error->all(FLERR,"GPUs are requested but Kokkos has not been compiled for CUDA");
+#endif
       if (iarg+2 > narg) error->all(FLERR,"Invalid Kokkos command-line args");
-      int ngpu = atoi(arg[iarg+1]);
+      ngpu = atoi(arg[iarg+1]);
 
       int skip_gpu = 9999;
       if (iarg+2 < narg && isdigit(arg[iarg+2][0])) {
@@ -88,7 +100,15 @@ KokkosLMP::KokkosLMP(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
 
   // initialize Kokkos
 
+  if (me == 0) {
+    if (screen) fprintf(screen,"  using %d GPU(s)\n",ngpu);
+    if (logfile) fprintf(logfile,"  using %d GPU(s)\n",ngpu);
+  }
+
 #ifdef KOKKOS_HAVE_CUDA
+  if (ngpu <= 0)
+    error->all(FLERR,"Kokkos has been compiled for CUDA but no GPUs are requested");
+
   Kokkos::HostSpace::execution_space::initialize(num_threads,numa);
   Kokkos::Cuda::SelectDevice select_device(device);
   Kokkos::Cuda::initialize(select_device);
@@ -99,10 +119,16 @@ KokkosLMP::KokkosLMP(LAMMPS *lmp, int narg, char **arg) : Pointers(lmp)
   // default settings for package kokkos command
 
   neighflag = FULL;
+  neighflag_qeq = FULL;
+  neighflag_qeq_set = 0;
   exchange_comm_classic = 0;
   forward_comm_classic = 0;
-  exchange_comm_on_host = 1;
-  forward_comm_on_host = 1;
+  exchange_comm_on_host = 0;
+  forward_comm_on_host = 0;
+
+#ifdef KILL_KOKKOS_ON_SIGSEGV
+  signal(SIGSEGV, my_signal_handler);
+#endif
 }
 
 /* ---------------------------------------------------------------------- */
@@ -128,21 +154,38 @@ void KokkosLMP::accelerator(int narg, char **arg)
   // defaults
 
   neighflag = FULL;
+  neighflag_qeq = FULL;
+  neighflag_qeq_set = 0;
   int newtonflag = 0;
   double binsize = 0.0;
   exchange_comm_classic = forward_comm_classic = 0;
-  exchange_comm_on_host = forward_comm_on_host = 1;
+  exchange_comm_on_host = forward_comm_on_host = 0;
 
   int iarg = 0;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"neigh") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
       if (strcmp(arg[iarg+1],"full") == 0) neighflag = FULL;
-      else if (strcmp(arg[iarg+1],"half/thread") == 0) neighflag = HALFTHREAD;
-      else if (strcmp(arg[iarg+1],"half") == 0) neighflag = HALF;
-      else if (strcmp(arg[iarg+1],"n2") == 0) neighflag = N2;
-      else if (strcmp(arg[iarg+1],"full/cluster") == 0) neighflag = FULLCLUSTER;
+      else if (strcmp(arg[iarg+1],"half") == 0) {
+        if (num_threads > 1 || ngpu > 0)
+          neighflag = HALFTHREAD;
+        else 
+          neighflag = HALF;
+      } else if (strcmp(arg[iarg+1],"n2") == 0) neighflag = N2;
       else error->all(FLERR,"Illegal package kokkos command");
+      if (!neighflag_qeq_set) neighflag_qeq = neighflag;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"neigh/qeq") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
+      if (strcmp(arg[iarg+1],"full") == 0) neighflag_qeq = FULL;
+      else if (strcmp(arg[iarg+1],"half") == 0) {
+        if (num_threads > 1 || ngpu > 0)
+          neighflag_qeq = HALFTHREAD;
+        else 
+          neighflag_qeq = HALF;
+      } else if (strcmp(arg[iarg+1],"n2") == 0) neighflag_qeq = N2;
+      else error->all(FLERR,"Illegal package kokkos command");
+      neighflag_qeq_set = 1;
       iarg += 2;
     } else if (strcmp(arg[iarg],"binsize") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal package kokkos command");
@@ -205,20 +248,6 @@ void KokkosLMP::accelerator(int narg, char **arg)
    called by Finish
 ------------------------------------------------------------------------- */
 
-int KokkosLMP::neigh_list_kokkos(int m)
-{
-  NeighborKokkos *nk = (NeighborKokkos *) neighbor;
-  if (nk->lists_host[m] && nk->lists_host[m]->d_numneigh.dimension_0())
-    return 1;
-  if (nk->lists_device[m] && nk->lists_device[m]->d_numneigh.dimension_0())
-    return 1;
-  return 0;
-}
-
-/* ----------------------------------------------------------------------
-   called by Finish
-------------------------------------------------------------------------- */
-
 int KokkosLMP::neigh_count(int m)
 {
   int inum;
@@ -228,31 +257,40 @@ int KokkosLMP::neigh_count(int m)
   ArrayTypes<LMPHostType>::t_int_1d h_numneigh;
 
   NeighborKokkos *nk = (NeighborKokkos *) neighbor;
-  if (nk->lists_host[m]) {
-    inum = nk->lists_host[m]->inum;
+  if (nk->lists[m]->execution_space == Host) {
+    NeighListKokkos<LMPHostType>* nlistKK = (NeighListKokkos<LMPHostType>*) nk->lists[m];
+    inum = nlistKK->inum;
 #ifndef KOKKOS_USE_CUDA_UVM
-    h_ilist = Kokkos::create_mirror_view(nk->lists_host[m]->d_ilist);
-    h_numneigh = Kokkos::create_mirror_view(nk->lists_host[m]->d_numneigh);
+    h_ilist = Kokkos::create_mirror_view(nlistKK->d_ilist);
+    h_numneigh = Kokkos::create_mirror_view(nlistKK->d_numneigh);
 #else
-    h_ilist = nk->lists_host[m]->d_ilist;
-    h_numneigh = nk->lists_host[m]->d_numneigh;
+    h_ilist = nlistKK->d_ilist;
+    h_numneigh = nlistKK->d_numneigh;
 #endif
-    Kokkos::deep_copy(h_ilist,nk->lists_host[m]->d_ilist);
-    Kokkos::deep_copy(h_numneigh,nk->lists_host[m]->d_numneigh);
-  } else if (nk->lists_device[m]) {
-    inum = nk->lists_device[m]->inum;
+    Kokkos::deep_copy(h_ilist,nlistKK->d_ilist);
+    Kokkos::deep_copy(h_numneigh,nlistKK->d_numneigh);
+  } else if (nk->lists[m]->execution_space == Device) {
+    NeighListKokkos<LMPDeviceType>* nlistKK = (NeighListKokkos<LMPDeviceType>*) nk->lists[m];
+    inum = nlistKK->inum;
 #ifndef KOKKOS_USE_CUDA_UVM
-    h_ilist = Kokkos::create_mirror_view(nk->lists_device[m]->d_ilist);
-    h_numneigh = Kokkos::create_mirror_view(nk->lists_device[m]->d_numneigh);
+    h_ilist = Kokkos::create_mirror_view(nlistKK->d_ilist);
+    h_numneigh = Kokkos::create_mirror_view(nlistKK->d_numneigh);
 #else
-    h_ilist = nk->lists_device[m]->d_ilist;
-    h_numneigh = nk->lists_device[m]->d_numneigh;
+    h_ilist = nlistKK->d_ilist;
+    h_numneigh = nlistKK->d_numneigh;
 #endif
-    Kokkos::deep_copy(h_ilist,nk->lists_device[m]->d_ilist);
-    Kokkos::deep_copy(h_numneigh,nk->lists_device[m]->d_numneigh);
+    Kokkos::deep_copy(h_ilist,nlistKK->d_ilist);
+    Kokkos::deep_copy(h_numneigh,nlistKK->d_numneigh);
   }
 
   for (int i = 0; i < inum; i++) nneigh += h_numneigh[h_ilist[i]];
 
   return nneigh;
+}
+
+void KokkosLMP::my_signal_handler(int sig)
+{
+  if (sig == SIGSEGV) {
+    kill(getpid(),SIGABRT);
+  }
 }

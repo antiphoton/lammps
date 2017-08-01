@@ -95,9 +95,9 @@ FixAdaptFEP::FixAdaptFEP(LAMMPS *lmp, int narg, char **arg) :
       n = strlen(arg[iarg+2]) + 1;
       adapt[nadapt].pparam = new char[n];
       strcpy(adapt[nadapt].pparam,arg[iarg+2]);
-      force->bounds(arg[iarg+3],atom->ntypes,
+      force->bounds(FLERR,arg[iarg+3],atom->ntypes,
                     adapt[nadapt].ilo,adapt[nadapt].ihi);
-      force->bounds(arg[iarg+4],atom->ntypes,
+      force->bounds(FLERR,arg[iarg+4],atom->ntypes,
                     adapt[nadapt].jlo,adapt[nadapt].jhi);
       if (strstr(arg[iarg+5],"v_") == arg[iarg+5]) {
         n = strlen(&arg[iarg+5][2]) + 1;
@@ -126,7 +126,7 @@ FixAdaptFEP::FixAdaptFEP(LAMMPS *lmp, int narg, char **arg) :
         adapt[nadapt].aparam = CHARGE;
         chgflag = 1;
       } else error->all(FLERR,"Illegal fix adapt/fep command");
-      force->bounds(arg[iarg+2],atom->ntypes,
+      force->bounds(FLERR,arg[iarg+2],atom->ntypes,
                     adapt[nadapt].ilo,adapt[nadapt].ihi);
       if (strstr(arg[iarg+3],"v_") == arg[iarg+3]) {
         int n = strlen(&arg[iarg+3][2]) + 1;
@@ -224,11 +224,12 @@ void FixAdaptFEP::post_constructor()
   id_fix_diam = NULL;
   id_fix_chg = NULL;
 
-  char **newarg = new char*[5];
+  char **newarg = new char*[6];
   newarg[1] = group->names[igroup];
   newarg[2] = (char *) "STORE";
-  newarg[3] = (char *) "1";
+  newarg[3] = (char *) "peratom";
   newarg[4] = (char *) "1";
+  newarg[5] = (char *) "1";
 
   if (diamflag) {
     int n = strlen(id) + strlen("_FIX_STORE_DIAM") + 1;
@@ -236,7 +237,7 @@ void FixAdaptFEP::post_constructor()
     strcpy(id_fix_diam,id);
     strcat(id_fix_diam,"_FIX_STORE_DIAM");
     newarg[0] = id_fix_diam;
-    modify->add_fix(5,newarg);
+    modify->add_fix(6,newarg);
     fix_diam = (FixStore *) modify->fix[modify->nfix-1];
 
     if (fix_diam->restart_reset) fix_diam->restart_reset = 0;
@@ -259,7 +260,7 @@ void FixAdaptFEP::post_constructor()
     strcpy(id_fix_chg,id);
     strcat(id_fix_chg,"_FIX_STORE_CHG");
     newarg[0] = id_fix_chg;
-    modify->add_fix(5,newarg);
+    modify->add_fix(6,newarg);
     fix_chg = (FixStore *) modify->fix[modify->nfix-1];
 
     if (fix_chg->restart_reset) fix_chg->restart_reset = 0;

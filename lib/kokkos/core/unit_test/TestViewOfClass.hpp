@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -48,79 +48,79 @@
 #include <sstream>
 #include <iostream>
 
-/*--------------------------------------------------------------------------*/
-
 namespace Test {
 
-namespace {
-volatile int nested_view_count ;
-}
-
 template< class Space >
-class NestedView {
-private:
-  Kokkos::View<int*,Space> member ;
+struct NestedView {
+  Kokkos::View< int*, Space > member;
 
 public:
+  KOKKOS_INLINE_FUNCTION
+  NestedView() : member() {}
 
   KOKKOS_INLINE_FUNCTION
-  NestedView()
-#if defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-    : member("member",2)
-    { Kokkos::atomic_increment( & nested_view_count ); }
-#else
-    : member(){}
-#endif
+  NestedView & operator=( const Kokkos::View< int*, Space > & lhs )
+  {
+    member = lhs;
+    if ( member.dimension_0() ) Kokkos::atomic_add( & member( 0 ), 1 );
+    return *this;
+  }
 
+  KOKKOS_INLINE_FUNCTION
   ~NestedView()
-#if defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
-    { Kokkos::atomic_decrement( & nested_view_count ); }
-#else
-    {}
-#endif
-
+  {
+    if ( member.dimension_0() ) {
+      Kokkos::atomic_add( & member( 0 ), -1 );
+    }
+  }
 };
 
+template< class Space >
+struct NestedViewFunctor {
+
+  Kokkos::View< NestedView<Space> *, Space > nested;
+  Kokkos::View< int*, Space >                array;
+
+  NestedViewFunctor(
+    const Kokkos::View< NestedView<Space> *, Space > & arg_nested,
+    const Kokkos::View< int*, Space >                & arg_array )
+  : nested( arg_nested )
+  , array(  arg_array )
+  {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()( int i ) const { nested[i] = array; }
+};
 
 template< class Space >
 void view_nested_view()
 {
-  ASSERT_EQ( 0 , nested_view_count );
+  Kokkos::View< int*, Space > tracking( "tracking", 1 );
+
+  typename Kokkos::View< int*, Space >::HostMirror host_tracking = Kokkos::create_mirror( tracking );
+
   {
-    Kokkos::View< NestedView<Space> * , Space > a("a_nested_view",2);
-    ASSERT_EQ( 2 , nested_view_count );
-    Kokkos::View< NestedView<Space> * , Space > b("b_nested_view",2);
-    ASSERT_EQ( 4 , nested_view_count );
+    Kokkos::View< NestedView<Space> *, Space > a( "a_nested_view", 2 );
+
+    Kokkos::parallel_for( Kokkos::RangePolicy< Space >( 0, 2 ), NestedViewFunctor< Space >( a, tracking ) );
+    Kokkos::deep_copy( host_tracking, tracking );
+    ASSERT_EQ( 2, host_tracking( 0 ) );
+
+    Kokkos::View< NestedView<Space> *, Space > b( "b_nested_view", 2 );
+    Kokkos::parallel_for( Kokkos::RangePolicy< Space >( 0, 2 ), NestedViewFunctor< Space >( b, tracking ) );
+    Kokkos::deep_copy( host_tracking, tracking );
+    ASSERT_EQ( 4, host_tracking( 0 ) );
+
   }
-  // ASSERT_EQ( 0 , nested_view_count );
+
+  Kokkos::deep_copy( host_tracking, tracking );
+
+  ASSERT_EQ( 0, host_tracking( 0 ) );
 }
 
-}
-
-namespace Kokkos {
-namespace Impl {
-
-template< class ExecSpace , class S >
-struct ViewDefaultConstruct< ExecSpace , Test::NestedView<S> , true >
+TEST_F( TEST_CATEGORY, view_nested_view )
 {
-  typedef Test::NestedView<S> type ;
-  type * const m_ptr ;
+  view_nested_view< TEST_EXECSPACE >();
+}
 
-  KOKKOS_FORCEINLINE_FUNCTION
-  void operator()( const typename ExecSpace::size_type& i ) const
-    { new(m_ptr+i) type(); }
-
-  ViewDefaultConstruct( type * pointer , size_t capacity )
-    : m_ptr( pointer )
-    {
-      Kokkos::RangePolicy< ExecSpace > range( 0 , capacity );
-      parallel_for( range , *this );
-      ExecSpace::fence();
-    }
-};
-
-} // namespace Impl
-} // namespace Kokkos
-
-/*--------------------------------------------------------------------------*/
-
+} // namespace Test

@@ -55,6 +55,7 @@ enum{ISO,ANISO,TRICLINIC};
 template<class DeviceType>
 FixNHKokkos<DeviceType>::FixNHKokkos(LAMMPS *lmp, int narg, char **arg) : FixNH(lmp, narg, arg)
 {
+  kokkosable = 1;
   domainKK = (DomainKokkos *) domain;
   execution_space = ExecutionSpaceFromDevice<DeviceType>::space;
 
@@ -291,7 +292,6 @@ void FixNHKokkos<DeviceType>::final_integrate()
 template<class DeviceType>
 void FixNHKokkos<DeviceType>::remap()
 {
-  int i;
   double oldlo,oldhi;
   double expfac;
 
@@ -495,7 +495,6 @@ void FixNHKokkos<DeviceType>::nh_v_press()
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nh_v_press<1> >(0,nlocal),*this);
   else
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nh_v_press<0> >(0,nlocal),*this);
-  DeviceType::fence();
   copymode = 0;
 
   atomKK->modified(execution_space,V_MASK);
@@ -550,7 +549,6 @@ void FixNHKokkos<DeviceType>::nve_v()
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nve_v<1> >(0,nlocal),*this);
   else
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nve_v<0> >(0,nlocal),*this);
-  DeviceType::fence();
   copymode = 0;
 }
 
@@ -595,7 +593,6 @@ void FixNHKokkos<DeviceType>::nve_x()
 
   copymode = 1;
   Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nve_x>(0,nlocal),*this);
-  DeviceType::fence();
   copymode = 0;
 }
 
@@ -631,7 +628,6 @@ void FixNHKokkos<DeviceType>::nh_v_temp()
 
   copymode = 1;
   Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagFixNH_nh_v_temp>(0,nlocal),*this);
-  DeviceType::fence();
   copymode = 0;
 
   atomKK->modified(execution_space,V_MASK);
@@ -732,7 +728,10 @@ void FixNHKokkos<DeviceType>::pre_exchange()
   }
 }
 
+namespace LAMMPS_NS {
 template class FixNHKokkos<LMPDeviceType>;
 #ifdef KOKKOS_HAVE_CUDA
 template class FixNHKokkos<LMPHostType>;
 #endif
+}
+

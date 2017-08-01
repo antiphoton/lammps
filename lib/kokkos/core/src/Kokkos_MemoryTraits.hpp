@@ -63,6 +63,8 @@ enum MemoryTraitsFlags
   { Unmanaged  = 0x01
   , RandomAccess = 0x02
   , Atomic = 0x04
+  , Restrict = 0x08
+  , Aligned = 0x10
   };
 
 template < unsigned T >
@@ -73,6 +75,8 @@ struct MemoryTraits {
   enum { Unmanaged    = T & unsigned(Kokkos::Unmanaged) };
   enum { RandomAccess = T & unsigned(Kokkos::RandomAccess) };
   enum { Atomic       = T & unsigned(Kokkos::Atomic) };
+  enum { Restrict     = T & unsigned(Kokkos::Restrict) };
+  enum { Aligned      = T & unsigned(Kokkos::Aligned) };
 
 };
 
@@ -101,9 +105,9 @@ namespace Impl {
  */
 enum { MEMORY_ALIGNMENT =
 #if defined( KOKKOS_MEMORY_ALIGNMENT )
-    ( 1 << Kokkos::Impl::power_of_two< KOKKOS_MEMORY_ALIGNMENT >::value )
+    ( 1 << Kokkos::Impl::integral_power_of_two( KOKKOS_MEMORY_ALIGNMENT ) )
 #else
-    ( 1 << Kokkos::Impl::power_of_two< 128 >::value )
+    ( 1 << Kokkos::Impl::integral_power_of_two( 128 ) )
 #endif
   , MEMORY_ALIGNMENT_THRESHOLD = 4 
   };

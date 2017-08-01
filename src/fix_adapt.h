@@ -43,7 +43,7 @@ class FixAdapt : public Fix {
 
  private:
   int nadapt,resetflag,scaleflag;
-  int anypair;
+  int anypair, anybond;
   int nlevels_respa;
   char *id_fix_diam,*id_fix_chg;
   class FixStore *fix_diam,*fix_chg;
@@ -52,11 +52,15 @@ class FixAdapt : public Fix {
     int which,ivar;
     char *var;
     char *pstyle,*pparam;
+    char *bstyle,*bparam;
     int ilo,ihi,jlo,jhi;
-    int pdim;
+    int pdim,bdim;
     double *scalar,scalar_orig;
+    double *vector,*vector_orig;
     double **array,**array_orig;
     int aparam;
+    class Pair *pair;
+    class Bond *bond;
   };
 
   Adapt *adapt;
@@ -98,6 +102,10 @@ Self-explanatory
 E: Fix adapt pair style param not supported
 
 The pair style does not know about the parameter you specified.
+
+E: Fix adapt pair style param is not compatible
+
+Self-explanatory
 
 E: Fix adapt type pair range is not valid for pair hybrid sub-style
 

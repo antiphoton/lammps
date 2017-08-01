@@ -165,7 +165,7 @@ def LttreeParseArgs(argv, settings):
         elif ((argv[i][0] == '-') and (__name__ == "__main__")):
             #elif (__name__ == "__main__"):
             raise InputError('Error('+g_program_name+'):\n'
-                             'Unrecogized command line argument \"'+argv[i]+'\"\n')
+                             'Unrecognized command line argument \"'+argv[i]+'\"\n')
         else:
             i += 1
 
@@ -731,7 +731,6 @@ if __name__ == "__main__":
         WriteFiles(files_content)
         sys.stderr.write(' done\n')
 
-        # Step 11: Now write the variable bindings/assignments table.
         # Now write the variable bindings/assignments table.
         sys.stderr.write('writing \"ttree_assignments.txt\" file...')
         open('ttree_assignments.txt', 'w').close() # <-- erase previous version.

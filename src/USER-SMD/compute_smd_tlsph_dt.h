@@ -1,4 +1,4 @@
-/* ----------------------------------------------------------------------
+/* -*- c++ -*- ----------------------------------------------------------
  *
  *                    *** Smooth Mach Dynamics ***
  *
@@ -25,7 +25,7 @@
 
 #ifdef COMPUTE_CLASS
 
-ComputeStyle(smd/tlsph_dt,ComputeSMDTlsphDt)
+ComputeStyle(smd/tlsph/dt,ComputeSMDTlsphDt)
 
 #else
 

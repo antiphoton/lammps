@@ -34,9 +34,11 @@ class ComputeTempCOM : public Compute {
   void compute_vector();
 
   void remove_bias(int, double *);
+  void remove_bias_thr(int, double *, double *);
   void remove_bias_all();
   void restore_bias(int, double *);
   void restore_bias_all();
+  void restore_bias_thr(int, double *, double *);
 
  private:
   double tfactor,masstotal;
@@ -57,5 +59,10 @@ E: Illegal ... command
 Self-explanatory.  Check the input script syntax and compare to the
 documentation for the command.  You can use -echo screen as a
 command-line option when running LAMMPS to see the offending line.
+
+E: Temperature compute degrees of freedom < 0
+
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

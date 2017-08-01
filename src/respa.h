@@ -48,7 +48,7 @@ class Respa : public Integrate {
   Respa(class LAMMPS *, int, char **);
   virtual ~Respa();
   virtual void init();
-  virtual void setup();
+  virtual void setup(int flag=1);
   virtual void setup_minimal(int);
   virtual void run(int);
   virtual void cleanup();
@@ -93,12 +93,6 @@ In the rRESPA integrator, you must compute pairwise potentials either
 all together (pair), or in pieces (inner/middle/outer).  You can't do
 both.
 
-E: Cannot set respa hybrid and any of pair/inner/middle/outer
-
-In the rRESPA integrator, you must compute pairwise potentials either
-all together (pair), with different cutoff regions (inner/middle/outer),
-or per hybrid sub-style (hybrid).  You cannot mix those.
-
 E: Must set both respa inner and outer
 
 Cannot use just the inner or outer option with respa without using the
@@ -108,6 +102,12 @@ E: Cannot set respa middle without inner/outer
 
 In the rRESPA integrator, you must define both a inner and outer
 setting in order to use a middle setting.
+
+E: Cannot set respa hybrid and any of pair/inner/middle/outer
+
+In the rRESPA integrator, you must compute pairwise potentials either
+all together (pair), with different cutoff regions (inner/middle/outer),
+or per hybrid sub-style (hybrid).  You cannot mix those.
 
 E: Invalid order of forces within respa levels
 

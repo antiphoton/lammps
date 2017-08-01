@@ -92,14 +92,13 @@ class Pair : protected Pointers {
   class NeighList *list;         // standard neighbor list used by most pairs
   class NeighList *listhalf;     // half list used by some pairs
   class NeighList *listfull;     // full list used by some pairs
-  class NeighList *listgranhistory;  // granular history list used by some pairs
+  class NeighList *listhistory;  // neighbor history list used by some pairs
   class NeighList *listinner;    // rRESPA lists used by some pairs
   class NeighList *listmiddle;
   class NeighList *listouter;
 
-  unsigned int datamask;
-  unsigned int datamask_ext;
-
+  int allocated;                 // 0/1 = whether arrays are allocated
+                                 //       public so external driver can check
   int compute_flag;              // 0 if skip compute()
 
   // KOKKOS host/device flag and data masks
@@ -114,6 +113,7 @@ class Pair : protected Pointers {
 
   void init();
   virtual void reinit();
+  virtual void setup() {}
   double mix_energy(double, double, double, double);
   double mix_distance(double, double);
   void write_file(int, char **);
@@ -169,11 +169,15 @@ class Pair : protected Pointers {
 
   virtual int pack_forward_comm(int, int *, double *, int, int *) {return 0;}
   virtual void unpack_forward_comm(int, int, double *) {}
-  virtual int pack_forward_comm_kokkos(int, DAT::tdual_int_2d, int, DAT::tdual_xfloat_1d&, int, int *) {return 0;};
-  virtual void unpack_forward_comm_kokkos(int, int, DAT::tdual_xfloat_1d&) {}
+  virtual int pack_forward_comm_kokkos(int, DAT::tdual_int_2d, 
+                                       int, DAT::tdual_xfloat_1d &, 
+                                       int, int *) {return 0;};
+  virtual void unpack_forward_comm_kokkos(int, int, DAT::tdual_xfloat_1d &) {}
   virtual int pack_reverse_comm(int, int, double *) {return 0;}
   virtual void unpack_reverse_comm(int, int *, double *) {}
   virtual double memory_usage();
+
+  void set_copymode(int value) {copymode = value;}
 
   // specific child-class methods for certain Pair styles
 
@@ -184,17 +188,14 @@ class Pair : protected Pointers {
   virtual void min_xf_get(int) {}
   virtual void min_x_set(int) {}
 
-  virtual unsigned int data_mask() {return datamask;}
-  virtual unsigned int data_mask_ext() {return datamask_ext;}
-
   // management of callbacks to be run from ev_tally()
 
  protected:
   int num_tally_compute;
   class Compute **list_tally_compute;
  public:
-  void add_tally_callback(class Compute *);
-  void del_tally_callback(class Compute *);
+  virtual void add_tally_callback(class Compute *);
+  virtual void del_tally_callback(class Compute *);
 
  protected:
   int instance_me;        // which Pair class instantiation I am
@@ -203,7 +204,6 @@ class Pair : protected Pointers {
 
   int special_lj[4];           // copied from force->special_lj for Kokkos
 
-  int allocated;               // 0/1 = whether arrays are allocated
   int suffix_flag;             // suffix compatibility flag
 
                                        // pair_modify settings
@@ -215,15 +215,13 @@ class Pair : protected Pointers {
 
   typedef union {int i; float f;} union_int_float_t;
 
-  double THIRD;
-
   int vflag_fdotr;
   int maxeatom,maxvatom;
 
   int copymode;   // if set, do not deallocate during destruction
                   // required when classes are used as functors by Kokkos
 
-  virtual void ev_setup(int, int);
+  virtual void ev_setup(int, int, int alloc = 1);
   void ev_unset();
   void ev_tally_full(int, double, double, double, double, double, double);
   void ev_tally_xyz_full(int, double, double,
@@ -236,7 +234,18 @@ class Pair : protected Pointers {
                       double, double, double, double, double, double);
   void virial_fdotr_compute();
 
-  inline int sbmask(int j) {
+  // union data struct for packing 32-bit and 64-bit ints into double bufs
+  // see atom_vec.h for documentation
+
+  union ubuf {
+    double d;
+    int64_t i;
+    ubuf(double arg) : d(arg) {}
+    ubuf(int64_t arg) : i(arg) {}
+    ubuf(int arg) : i(arg) {}
+  };
+
+  inline int sbmask(int j) const {
     return j >> SBBITS & 3;
   }
 };
@@ -272,6 +281,14 @@ This is probably a bogus thing to do, since tail corrections are
 computed by integrating the density of a periodic system out to
 infinity.
 
+W: Using pair tail corrections with pair_modify compute no
+
+The tail corrections will thus not be computed.
+
+W: Using pair potential shift with pair_modify compute no
+
+The shift effects will thus not be computed.
+
 W: Using a manybody potential with bonds/angles/dihedrals and special_bond exclusions
 
 This is likely not what you want to do.  The exclusion settings will
@@ -290,6 +307,10 @@ New coding for the pair style would need to be done.
 E: Pair style requires a KSpace style
 
 No kspace style is defined.
+
+E: Cannot yet use compute tally with Kokkos
+
+This feature is not yet supported.
 
 E: Pair style does not support pair_write
 

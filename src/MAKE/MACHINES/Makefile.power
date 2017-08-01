@@ -51,7 +51,7 @@ MPI_LIB =
 # PATH = path for FFT library
 # LIB = name of FFT library
 
-FFT_INC =       -DFFT_FFTW -I/scr/oppe/LAMMPS/fftw-2.1.5/include
+FFT_INC =       -DFFT_FFTW2 -I/scr/oppe/LAMMPS/fftw-2.1.5/include
 FFT_PATH =	-L/scr/oppe/LAMMPS/fftw-2.1.5/lib
 FFT_LIB =	-lfftw
 
@@ -112,5 +112,10 @@ shlib:	$(OBJ) $(EXTRA_LINK_DEPENDS)
 
 # Individual dependencies
 
-DEPENDS = $(OBJ:.o=.d)
-sinclude $(DEPENDS)
+depend : fastdep.exe $(SRC)
+	@./fastdep.exe $(EXTRA_INC) -- $^ > .depend || exit 1
+
+fastdep.exe: ../DEPEND/fastdep.c
+	cc -O -o $@ $<
+
+sinclude .depend

@@ -46,7 +46,11 @@ using namespace FixConst;
 /* ---------------------------------------------------------------------- */
 
 FixQEq::FixQEq(LAMMPS *lmp, int narg, char **arg) :
-  Fix(lmp, narg, arg)
+  Fix(lmp, narg, arg), list(NULL), chi(NULL), eta(NULL), 
+  gamma(NULL), zeta(NULL), zcore(NULL), chizj(NULL), shld(NULL), 
+  s(NULL), t(NULL), s_hist(NULL), t_hist(NULL), Hdia_inv(NULL), b_s(NULL), 
+  b_t(NULL), p(NULL), q(NULL), r(NULL), d(NULL), 
+  qf(NULL), q1(NULL), q2(NULL), qv(NULL)
 {
   if (narg < 8) error->all(FLERR,"Illegal fix qeq command");
 
@@ -54,6 +58,10 @@ FixQEq::FixQEq(LAMMPS *lmp, int narg, char **arg) :
   cutoff = force->numeric(FLERR,arg[4]);
   tolerance = force->numeric(FLERR,arg[5]);
   maxiter = force->inumeric(FLERR,arg[6]);
+
+  // check for sane arguments
+  if ((nevery <= 0) || (cutoff <= 0.0) || (tolerance <= 0.0) || (maxiter <= 0))
+    error->all(FLERR,"Illegal fix qeq command");
 
   alpha = 0.20;
   swa = 0.0;
@@ -92,6 +100,7 @@ FixQEq::FixQEq(LAMMPS *lmp, int narg, char **arg) :
   q1 = NULL;
   q2 = NULL;
   streitz_flag = 0;
+  qv = NULL;
 
   comm_forward = comm_reverse = 1;
 
@@ -170,6 +179,8 @@ void FixQEq::allocate_storage()
   memory->create(qf,nmax,"qeq:qf");
   memory->create(q1,nmax,"qeq:q1");
   memory->create(q2,nmax,"qeq:q2");
+
+  memory->create(qv,nmax,"qeq:qv");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -192,6 +203,8 @@ void FixQEq::deallocate_storage()
   memory->destroy( qf );
   memory->destroy( q1 );
   memory->destroy( q2 );
+
+  memory->destroy( qv );
 }
 
 /* ---------------------------------------------------------------------- */
@@ -273,8 +286,6 @@ void FixQEq::setup_pre_force(int vflag)
   if (force->newton_pair == 0)
     error->all(FLERR,"QEQ with 'newton pair off' not supported");
 
-  neighbor->build_one(list);
-
   deallocate_storage();
   allocate_storage();
 
@@ -296,13 +307,6 @@ void FixQEq::setup_pre_force_respa(int vflag, int ilevel)
 
 /* ---------------------------------------------------------------------- */
 
-void FixQEq::min_setup_pre_force(int vflag)
-{
-  setup_pre_force(vflag);
-}
-
-/* ---------------------------------------------------------------------- */
-
 void FixQEq::init_storage()
 {
   nlocal = atom->nlocal;
@@ -318,6 +322,8 @@ void FixQEq::init_storage()
     qf[i] = 0.0;
     q1[i] = 0.0;
     q2[i] = 0.0;
+
+    qv[i] = 0.0;
   }
 }
 

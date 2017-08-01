@@ -35,10 +35,13 @@ class ComputeTempRegion : public Compute {
 
   void dof_remove_pre();
   int dof_remove(int);
+
   void remove_bias(int, double *);
+  void remove_bias_thr(int, double *, double *);
   void remove_bias_all();
   void restore_bias(int, double *);
   void restore_bias_all();
+  void restore_bias_thr(int, double *, double *);
   double memory_usage();
 
  protected:
@@ -62,5 +65,10 @@ command-line option when running LAMMPS to see the offending line.
 E: Region ID for compute temp/region does not exist
 
 Self-explanatory.
+
+E: Temperature compute degrees of freedom < 0
+
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

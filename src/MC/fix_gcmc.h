@@ -1,4 +1,4 @@
-/* ----------------------------------------------------------------------
+/* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
@@ -106,13 +106,15 @@ class FixGCMC : public Fix {
   double xlo,xhi,ylo,yhi,zlo,zhi;
   double region_xlo,region_xhi,region_ylo,region_yhi,region_zlo,region_zhi;
   double region_volume;
-  double energy_stored;
+  double energy_stored;  // full energy of old/current configuration
   double *sublo,*subhi;
   int *local_gas_list;
   double **cutsq;
   double **atom_coord;
   imageint imagezero;
-
+  double overlap_cutoffsq; // square distance cutoff for overlap 
+  int overlap_flag;
+  
   double energy_intra;
 
   class Pair *pair;
@@ -126,9 +128,9 @@ class FixGCMC : public Fix {
   int imol,nmol;
   double **coords;
   imageint *imageflags;
-  class Fix *fixshake;
-  int shakeflag;
-  char *idshake;
+  class Fix *fixrigid, *fixshake;
+  int rigidflag, shakeflag;
+  char *idrigid, *idshake;
   int triclinic;                         // 0 = orthog box, 1 = triclinic
 
   class Compute *c_pe;
@@ -178,10 +180,18 @@ E: Atom type must be zero in fix gcmc mol command
 
 Self-explanatory.
 
+E: Fix gcmc molecule has charges, but atom style does not
+
+Self-explanatory.
+
 E: Fix gcmc molecule template ID must be same as atom_style template ID
 
 When using atom_style template, you cannot insert molecules that are
 not in that template.
+
+E: Fix gcmc atom has charge, but atom style does not
+
+Self-explanatory.
 
 E: Cannot use fix gcmc shake and not molecule
 
@@ -204,9 +214,14 @@ W: Fix gcmc using full_energy option
 
 Fix gcmc has automatically turned on the full_energy option since it
 is required for systems like the one specified by the user. User input
-included one or more of the following: kspace, triclinic, a hybrid
-pair style, an eam pair style, or no "single" function for the pair
-style.
+included one or more of the following: kspace, a hybrid
+pair style, an eam pair style, tail correction, 
+or no "single" function for the pair style.
+
+W: Energy of old configuration in fix gcmc is > MAXENERGYTEST. 
+
+This probably means that a pair of atoms are closer than the 
+overlap cutoff distance for keyword overlap_cutoff.
 
 E: Invalid atom type in fix gcmc command
 
@@ -239,6 +254,10 @@ E: Fix gcmc and fix shake not using same molecule template ID
 
 Self-explanatory.
 
+E: Fix gcmc can not currently be used with fix rigid or fix rigid/small
+
+Self-explanatory.
+
 E: Cannot use fix gcmc in a 2d simulation
 
 Fix gcmc is set up to run in 3d only. No 2d simulations with fix gcmc
@@ -257,10 +276,18 @@ E: Illegal fix gcmc gas mass <= 0
 The computed mass of the designated gas molecule or atom type was less
 than or equal to zero.
 
-E: Cannot do gcmc on atoms in atom_modify first group
+E: Cannot do GCMC on atoms in atom_modify first group
 
 This is a restriction due to the way atoms are organized in a list to
 enable the atom_modify first command.
+
+E: Could not find specified fix gcmc group ID
+
+Self-explanatory.
+
+E: Fix gcmc put atom outside box
+
+This should not normally happen.  Contact the developers.
 
 E: Fix gcmc ran out of available molecule IDs
 

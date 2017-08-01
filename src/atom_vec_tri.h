@@ -91,8 +91,8 @@ class AtomVecTri : public AtomVec {
   imageint *image;
   double **x,**v,**f;
   tagint *molecule;
-  double *rmass;
-  double **angmom,**torque;
+  double *rmass,*radius;
+  double **omega,**angmom,**torque;
   int *tri;
 
   int nlocal_bonus,nghost_bonus,nmax_bonus;
@@ -140,7 +140,7 @@ the atom coordinate.
 
 E: Insufficient Jacobi rotations for triangle
 
-The calculation of the intertia tensor of the triangle failed.  This
+The calculation of the inertia tensor of the triangle failed.  This
 should not happen if it is a reasonably shaped triangle.
 
 */

@@ -38,13 +38,16 @@ using namespace MathConst;
 
 enum{ATOM,MOLECULE};
 enum{LAYOUT_UNIFORM,LAYOUT_NONUNIFORM,LAYOUT_TILED};    // several files
+enum{DIST_UNIFORM,DIST_GAUSSIAN};
 
 #define EPSILON 1.0e6
 
 /* ---------------------------------------------------------------------- */
 
 FixDeposit::FixDeposit(LAMMPS *lmp, int narg, char **arg) :
-  Fix(lmp, narg, arg)
+  Fix(lmp, narg, arg), idregion(NULL), idrigid(NULL),
+  idshake(NULL), onemols(NULL), molfrac(NULL), coords(NULL), imageflags(NULL),
+  fixrigid(NULL), fixshake(NULL), random(NULL)
 {
   if (narg < 7) error->all(FLERR,"Illegal fix deposit command");
 
@@ -169,6 +172,10 @@ FixDeposit::FixDeposit(LAMMPS *lmp, int narg, char **arg) :
   vyhi *= yscale;
   vzlo *= zscale;
   vzhi *= zscale;
+  xmid *= xscale;
+  ymid *= yscale;
+  zmid *= zscale;
+  sigma *= xscale; // same as in region sphere
   tx *= xscale;
   ty *= yscale;
   tz *= zscale;
@@ -227,7 +234,7 @@ void FixDeposit::init()
   fixrigid = NULL;
   if (rigidflag) {
     int ifix = modify->find_fix(idrigid);
-    if (ifix < 0) error->all(FLERR,"Fix pour rigid fix does not exist");
+    if (ifix < 0) error->all(FLERR,"Fix deposit rigid fix does not exist");
     fixrigid = modify->fix[ifix];
     int tmp;
     if (onemols != (Molecule **) fixrigid->extract("onemol",tmp))
@@ -301,6 +308,13 @@ void FixDeposit::pre_exchange()
 
   if (next_reneighbor != update->ntimestep) return;
 
+  // clear ghost count and any ghost bonus data internal to AtomVec
+  // same logic as beginning of Comm::exchange()
+  // do it now b/c inserting atoms will overwrite ghost atoms
+
+  atom->nghost = 0;
+  atom->avec->clear_bonus();
+
   // compute current offset = bottom of insertion volume
 
   double offset = 0.0;
@@ -329,15 +343,19 @@ void FixDeposit::pre_exchange()
     attempt++;
 
     // choose random position for new particle within region
-
-    coord[0] = xlo + random->uniform() * (xhi-xlo);
-    coord[1] = ylo + random->uniform() * (yhi-ylo);
-    coord[2] = zlo + random->uniform() * (zhi-zlo);
-    while (domain->regions[iregion]->match(coord[0],coord[1],coord[2]) == 0) {
-      coord[0] = xlo + random->uniform() * (xhi-xlo);
-      coord[1] = ylo + random->uniform() * (yhi-ylo);
-      coord[2] = zlo + random->uniform() * (zhi-zlo);
-    }
+    if (distflag == DIST_UNIFORM) {
+      do {
+        coord[0] = xlo + random->uniform() * (xhi-xlo);
+        coord[1] = ylo + random->uniform() * (yhi-ylo);
+        coord[2] = zlo + random->uniform() * (zhi-zlo);
+      } while (domain->regions[iregion]->match(coord[0],coord[1],coord[2]) == 0);
+    } else if (distflag == DIST_GAUSSIAN) {
+      do {
+        coord[0] = xmid + random->gaussian() * sigma;
+        coord[1] = ymid + random->gaussian() * sigma;
+        coord[2] = zmid + random->gaussian() * sigma;
+      } while (domain->regions[iregion]->match(coord[0],coord[1],coord[2]) == 0);
+    } else error->all(FLERR,"Unknown particle distribution in fix deposit");
 
     // adjust vertical coord by offset
 
@@ -524,8 +542,10 @@ void FixDeposit::pre_exchange()
         atom->v[n][0] = vnew[0];
         atom->v[n][1] = vnew[1];
         atom->v[n][2] = vnew[2];
-        if (mode == MOLECULE)
+        if (mode == MOLECULE) {
+	  onemols[imol]->quat_external = quat;
           atom->add_molecule_atom(onemols[imol],m,n,maxtag_all);
+	}
         modify->create_attribute(n);
       }
     }
@@ -559,7 +579,8 @@ void FixDeposit::pre_exchange()
   // reset global natoms,nbonds,etc
   // increment maxtag_all and maxmol_all if necessary
   // if global map exists, reset it now instead of waiting for comm
-  // since adding atoms messes up ghosts
+  //   since other pre-exchange fixes may use it
+  //   invoke map_init() b/c atom count has grown
 
   if (success) {
     atom->natoms += natom;
@@ -576,7 +597,6 @@ void FixDeposit::pre_exchange()
       error->all(FLERR,"New atom IDs exceed maximum allowed ID");
     if (mode == MOLECULE && atom->molecule_flag) maxmol_all++;
     if (atom->map_style) {
-      atom->nghost = 0;
       atom->map_init();
       atom->map_set();
     }
@@ -635,6 +655,9 @@ void FixDeposit::options(int narg, char **arg)
   maxattempt = 10;
   rateflag = 0;
   vxlo = vxhi = vylo = vyhi = vzlo = vzhi = 0.0;
+  distflag = DIST_UNIFORM;
+  sigma = 1.0;
+  xmid = ymid = zmid = 0.0;
   scaleflag = 1;
   targetflag = 0;
 
@@ -750,6 +773,14 @@ void FixDeposit::options(int narg, char **arg)
       else if (strcmp(arg[iarg+1],"lattice") == 0) scaleflag = 1;
       else error->all(FLERR,"Illegal fix deposit command");
       iarg += 2;
+    } else if (strcmp(arg[iarg],"gaussian") == 0) {
+      if (iarg+5 > narg) error->all(FLERR,"Illegal fix deposit command");
+      xmid = force->numeric(FLERR,arg[iarg+1]);
+      ymid = force->numeric(FLERR,arg[iarg+2]);
+      zmid = force->numeric(FLERR,arg[iarg+3]);
+      sigma = force->numeric(FLERR,arg[iarg+4]);
+      distflag = DIST_GAUSSIAN;
+      iarg += 5;
     } else if (strcmp(arg[iarg],"target") == 0) {
       if (iarg+4 > narg) error->all(FLERR,"Illegal fix deposit command");
       tx = force->numeric(FLERR,arg[iarg+1]);
@@ -811,23 +842,24 @@ void *FixDeposit::extract(const char *str, int &itype)
 
     } else {
 
-      // find a molecule in template with matching type
+      // loop over onemols molecules
+      // skip a molecule with no atoms as large as itype
 
+      oneradius = 0.0;
       for (int i = 0; i < nmol; i++) {
-        if (itype-ntype > onemols[i]->ntypes) continue;
+        if (itype > ntype+onemols[i]->ntypes) continue;
         double *radius = onemols[i]->radius;
         int *type = onemols[i]->type;
         int natoms = onemols[i]->natoms;
 
-        // check radii of matching types in Molecule
+        // check radii of atoms in Molecule with matching types
         // default to 0.5, if radii not defined in Molecule
         //   same as atom->avec->create_atom(), invoked in pre_exchange()
 
-        oneradius = 0.0;
         for (int i = 0; i < natoms; i++)
-          if (type[i] == itype-ntype) {
+          if (type[i]+ntype == itype) {
             if (radius) oneradius = MAX(oneradius,radius[i]);
-            else oneradius = 0.5;
+            else oneradius = MAX(oneradius,0.5);
           }
       }
     }

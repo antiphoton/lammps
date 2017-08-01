@@ -761,14 +761,6 @@ void AtomVecFullKokkos::unpack_reverse(int n, int *list, double *buf)
 
 template<class DeviceType,int PBC_FLAG>
 struct AtomVecFullKokkos_PackBorder {
-  union ubuf {
-    double d;
-    int64_t i;
-    ubuf(double arg) : d(arg) {}
-    ubuf(int64_t arg) : i(arg) {}
-    ubuf(int arg) : i(arg) {}
-  };
-
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
 
@@ -805,20 +797,20 @@ struct AtomVecFullKokkos_PackBorder {
           _buf(i,0) = _x(j,0);
           _buf(i,1) = _x(j,1);
           _buf(i,2) = _x(j,2);
-          _buf(i,3) = ubuf(_tag(j)).d;
-          _buf(i,4) = ubuf(_type(j)).d;
-          _buf(i,5) = ubuf(_mask(j)).d;
+          _buf(i,3) = d_ubuf(_tag(j)).d;
+          _buf(i,4) = d_ubuf(_type(j)).d;
+          _buf(i,5) = d_ubuf(_mask(j)).d;
           _buf(i,6) = _q(j);
-          _buf(i,7) = ubuf(_molecule(j)).d;
+          _buf(i,7) = d_ubuf(_molecule(j)).d;
       } else {
           _buf(i,0) = _x(j,0) + _dx;
           _buf(i,1) = _x(j,1) + _dy;
           _buf(i,2) = _x(j,2) + _dz;
-          _buf(i,3) = ubuf(_tag(j)).d;
-          _buf(i,4) = ubuf(_type(j)).d;
-          _buf(i,5) = ubuf(_mask(j)).d;
+          _buf(i,3) = d_ubuf(_tag(j)).d;
+          _buf(i,4) = d_ubuf(_type(j)).d;
+          _buf(i,5) = d_ubuf(_mask(j)).d;
           _buf(i,6) = _q(j);
-          _buf(i,7) = ubuf(_molecule(j)).d;
+          _buf(i,7) = d_ubuf(_molecule(j)).d;
       }
   }
 };
@@ -1027,14 +1019,6 @@ int AtomVecFullKokkos::pack_border_hybrid(int n, int *list, double *buf)
 
 template<class DeviceType>
 struct AtomVecFullKokkos_UnpackBorder {
-  union ubuf {
-    double d;
-    int64_t i;
-    ubuf(double arg) : d(arg) {}
-    ubuf(int64_t arg) : i(arg) {}
-    ubuf(int arg) : i(arg) {}
-  };
-
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
 
@@ -1066,11 +1050,11 @@ struct AtomVecFullKokkos_UnpackBorder {
       _x(i+_first,0) = _buf(i,0);
       _x(i+_first,1) = _buf(i,1);
       _x(i+_first,2) = _buf(i,2);
-      _tag(i+_first) = (tagint) ubuf(_buf(i,3)).i;
-      _type(i+_first) = (int) ubuf(_buf(i,4)).i;
-      _mask(i+_first) = (int) ubuf(_buf(i,5)).i;
+      _tag(i+_first) = (tagint) d_ubuf(_buf(i,3)).i;
+      _type(i+_first) = (int) d_ubuf(_buf(i,4)).i;
+      _mask(i+_first) = (int) d_ubuf(_buf(i,5)).i;
       _q(i+_first) = _buf(i,6);
-      _molecule(i+_first) = (tagint) ubuf(_buf(i,7)).i;
+      _molecule(i+_first) = (tagint) d_ubuf(_buf(i,7)).i;
 
   }
 };
@@ -1104,10 +1088,9 @@ void AtomVecFullKokkos::unpack_border(int n, int first, double *buf)
 
   m = 0;
   last = first + n;
-  if(n > 0)
-    modified(Host,X_MASK|TAG_MASK|TYPE_MASK|MASK_MASK|Q_MASK|MOLECULE_MASK);
   for (i = first; i < last; i++) {
     if (i == nmax) grow(0);
+    modified(Host,X_MASK|TAG_MASK|TYPE_MASK|MASK_MASK|Q_MASK|MOLECULE_MASK);
     h_x(i,0) = buf[m++];
     h_x(i,1) = buf[m++];
     h_x(i,2) = buf[m++];
@@ -1134,7 +1117,7 @@ void AtomVecFullKokkos::unpack_border_vel(int n, int first, double *buf)
   last = first + n;
   for (i = first; i < last; i++) {
     if (i == nmax) grow(0);
-    modified(Host,X_MASK|TAG_MASK|TYPE_MASK|MASK_MASK|Q_MASK|MOLECULE_MASK);
+    modified(Host,X_MASK|V_MASK|TAG_MASK|TYPE_MASK|MASK_MASK|Q_MASK|MOLECULE_MASK);
     h_x(i,0) = buf[m++];
     h_x(i,1) = buf[m++];
     h_x(i,2) = buf[m++];
@@ -1173,15 +1156,6 @@ int AtomVecFullKokkos::unpack_border_hybrid(int n, int first, double *buf)
 
 template<class DeviceType>
 struct AtomVecFullKokkos_PackExchangeFunctor {
-
-  union ubuf {
-    double d;
-    int64_t i;
-    ubuf(double arg) : d(arg) {}
-    ubuf(int64_t arg) : i(arg) {}
-    ubuf(int arg) : i(arg) {}
-  };
-
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   typename AT::t_x_array_randomread _x;
@@ -1320,7 +1294,7 @@ struct AtomVecFullKokkos_PackExchangeFunctor {
     elements = 20+atom->maxspecial+2*atom->bond_per_atom+4*atom->angle_per_atom+
       5*atom->dihedral_per_atom + 5*atom->improper_per_atom;
     const int maxsendlist = (buf.template view<DeviceType>().dimension_0()*
-			     buf.template view<DeviceType>().dimension_1())/elements;
+                             buf.template view<DeviceType>().dimension_1())/elements;
     buffer_view<DeviceType>(_buf,buf,maxsendlist,elements);
   }
 
@@ -1336,46 +1310,46 @@ struct AtomVecFullKokkos_PackExchangeFunctor {
     _buf(mysend,m++) = _v(i,0);
     _buf(mysend,m++) = _v(i,1);
     _buf(mysend,m++) = _v(i,2);
-    _buf(mysend,m++) = ubuf(_tag(i)).d;
-    _buf(mysend,m++) = ubuf(_type(i)).d;
-    _buf(mysend,m++) = ubuf(_mask(i)).d;
-    _buf(mysend,m++) = ubuf(_image(i)).d;
+    _buf(mysend,m++) = d_ubuf(_tag(i)).d;
+    _buf(mysend,m++) = d_ubuf(_type(i)).d;
+    _buf(mysend,m++) = d_ubuf(_mask(i)).d;
+    _buf(mysend,m++) = d_ubuf(_image(i)).d;
     _buf(mysend,m++) = _q(i);
-    _buf(mysend,m++) = ubuf(_molecule(i)).d;
-    _buf(mysend,m++) = ubuf(_num_bond(i)).d;
+    _buf(mysend,m++) = d_ubuf(_molecule(i)).d;
+    _buf(mysend,m++) = d_ubuf(_num_bond(i)).d;
     for (k = 0; k < _num_bond(i); k++) {
-      _buf(mysend,m++) = ubuf(_bond_type(i,k)).d;
-      _buf(mysend,m++) = ubuf(_bond_atom(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_bond_type(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_bond_atom(i,k)).d;
     }
-    _buf(mysend,m++) = ubuf(_num_angle(i)).d;
+    _buf(mysend,m++) = d_ubuf(_num_angle(i)).d;
     for (k = 0; k < _num_angle(i); k++) {
-      _buf(mysend,m++) = ubuf(_angle_type(i,k)).d;
-      _buf(mysend,m++) = ubuf(_angle_atom1(i,k)).d;
-      _buf(mysend,m++) = ubuf(_angle_atom2(i,k)).d;
-      _buf(mysend,m++) = ubuf(_angle_atom3(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_angle_type(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_angle_atom1(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_angle_atom2(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_angle_atom3(i,k)).d;
     }
-    _buf(mysend,m++) = ubuf(_num_dihedral(i)).d;
+    _buf(mysend,m++) = d_ubuf(_num_dihedral(i)).d;
     for (k = 0; k < _num_dihedral(i); k++) {
-      _buf(mysend,m++) = ubuf(_dihedral_type(i,k)).d;
-      _buf(mysend,m++) = ubuf(_dihedral_atom1(i,k)).d;
-      _buf(mysend,m++) = ubuf(_dihedral_atom2(i,k)).d;
-      _buf(mysend,m++) = ubuf(_dihedral_atom3(i,k)).d;
-      _buf(mysend,m++) = ubuf(_dihedral_atom4(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_dihedral_type(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_dihedral_atom1(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_dihedral_atom2(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_dihedral_atom3(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_dihedral_atom4(i,k)).d;
     }
-    _buf(mysend,m++) = ubuf(_num_improper(i)).d;
+    _buf(mysend,m++) = d_ubuf(_num_improper(i)).d;
     for (k = 0; k < _num_improper(i); k++) {
-      _buf(mysend,m++) = ubuf(_improper_type(i,k)).d;
-      _buf(mysend,m++) = ubuf(_improper_atom1(i,k)).d;
-      _buf(mysend,m++) = ubuf(_improper_atom2(i,k)).d;
-      _buf(mysend,m++) = ubuf(_improper_atom3(i,k)).d;
-      _buf(mysend,m++) = ubuf(_improper_atom4(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_improper_type(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_improper_atom1(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_improper_atom2(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_improper_atom3(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_improper_atom4(i,k)).d;
     }
 
-    _buf(mysend,m++) = ubuf(_nspecial(i,0)).d;
-    _buf(mysend,m++) = ubuf(_nspecial(i,1)).d;
-    _buf(mysend,m++) = ubuf(_nspecial(i,2)).d;
+    _buf(mysend,m++) = d_ubuf(_nspecial(i,0)).d;
+    _buf(mysend,m++) = d_ubuf(_nspecial(i,1)).d;
+    _buf(mysend,m++) = d_ubuf(_nspecial(i,2)).d;
     for (k = 0; k < _nspecial(i,2); k++)
-      _buf(mysend,m++) = ubuf(_special(i,k)).d;
+      _buf(mysend,m++) = d_ubuf(_special(i,k)).d;
 
     const int j = _copylist(mysend);
 
@@ -1523,15 +1497,6 @@ int AtomVecFullKokkos::pack_exchange(int i, double *buf)
 
 template<class DeviceType>
 struct AtomVecFullKokkos_UnpackExchangeFunctor {
-
-  union ubuf {
-    double d;
-    int64_t i;
-    ubuf(double arg) : d(arg) {}
-    ubuf(int64_t arg) : i(arg) {}
-    ubuf(int arg) : i(arg) {}
-  };
-
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   typename AT::t_x_array _x;
@@ -1606,7 +1571,7 @@ struct AtomVecFullKokkos_UnpackExchangeFunctor {
     elements = 20+atom->maxspecial+2*atom->bond_per_atom+4*atom->angle_per_atom+
       5*atom->dihedral_per_atom + 5*atom->improper_per_atom;
     const int maxsendlist = (buf.template view<DeviceType>().dimension_0()*
-			     buf.template view<DeviceType>().dimension_1())/elements;
+                             buf.template view<DeviceType>().dimension_1())/elements;
     buffer_view<DeviceType>(_buf,buf,maxsendlist,elements);
   }
 
@@ -1622,46 +1587,46 @@ struct AtomVecFullKokkos_UnpackExchangeFunctor {
       _v(i,0) = _buf(myrecv,m++);
       _v(i,1) = _buf(myrecv,m++);
       _v(i,2) = _buf(myrecv,m++);
-      _tag(i) = (tagint) ubuf(_buf(myrecv,m++)).i;
-      _type(i) = (int) ubuf(_buf(myrecv,m++)).i;
-      _mask(i) = (int) ubuf(_buf(myrecv,m++)).i;
-      _image(i) = (imageint) ubuf(_buf(myrecv,m++)).i;
+      _tag(i) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+      _type(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
+      _mask(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
+      _image(i) = (imageint) d_ubuf(_buf(myrecv,m++)).i;
       _q(i) = _buf(myrecv,m++);
-      _molecule(i) = (tagint) ubuf(_buf(myrecv,m++)).i;
-      _num_bond(i) = (int) ubuf(_buf(myrecv,m++)).i;
+      _molecule(i) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+      _num_bond(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
       int k;
       for (k = 0; k < _num_bond(i); k++) {
-        _bond_type(i,k) = (int) ubuf(_buf(myrecv,m++)).i;
-        _bond_atom(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
+        _bond_type(i,k) = (int) d_ubuf(_buf(myrecv,m++)).i;
+        _bond_atom(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
       }
-      _num_angle(i) = (int) ubuf(_buf(myrecv,m++)).i;
+      _num_angle(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
       for (k = 0; k < _num_angle(i); k++) {
-        _angle_type(i,k) = (int) ubuf(_buf(myrecv,m++)).i;
-        _angle_atom1(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _angle_atom2(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _angle_atom3(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
+        _angle_type(i,k) = (int) d_ubuf(_buf(myrecv,m++)).i;
+        _angle_atom1(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _angle_atom2(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _angle_atom3(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
       }
-      _num_dihedral(i) = (int) ubuf(_buf(myrecv,m++)).i;
+      _num_dihedral(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
       for (k = 0; k < _num_dihedral(i); k++) {
-        _dihedral_type(i,k) = (int) ubuf(_buf(myrecv,m++)).i;
-        _dihedral_atom1(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _dihedral_atom2(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _dihedral_atom3(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _dihedral_atom4(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
+        _dihedral_type(i,k) = (int) d_ubuf(_buf(myrecv,m++)).i;
+        _dihedral_atom1(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _dihedral_atom2(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _dihedral_atom3(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _dihedral_atom4(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
       }
-      _num_improper(i) = (int) ubuf(_buf(myrecv,m++)).i;
+      _num_improper(i) = (int) d_ubuf(_buf(myrecv,m++)).i;
       for (k = 0; k < _num_improper(i); k++) {
-        _improper_type(i,k) = (int) ubuf(_buf(myrecv,m++)).i;
-        _improper_atom1(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _improper_atom2(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _improper_atom3(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
-        _improper_atom4(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
+        _improper_type(i,k) = (int) d_ubuf(_buf(myrecv,m++)).i;
+        _improper_atom1(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _improper_atom2(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _improper_atom3(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
+        _improper_atom4(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
       }
-      _nspecial(i,0) = (int) ubuf(_buf(myrecv,m++)).i;
-      _nspecial(i,1) = (int) ubuf(_buf(myrecv,m++)).i;
-      _nspecial(i,2) = (int) ubuf(_buf(myrecv,m++)).i;
+      _nspecial(i,0) = (int) d_ubuf(_buf(myrecv,m++)).i;
+      _nspecial(i,1) = (int) d_ubuf(_buf(myrecv,m++)).i;
+      _nspecial(i,2) = (int) d_ubuf(_buf(myrecv,m++)).i;
       for (k = 0; k < _nspecial(i,2); k++)
-        _special(i,k) = (tagint) ubuf(_buf(myrecv,m++)).i;
+        _special(i,k) = (tagint) d_ubuf(_buf(myrecv,m++)).i;
     }
   }
 };
@@ -1867,7 +1832,9 @@ int AtomVecFullKokkos::unpack_restart(double *buf)
     if (atom->nextra_store)
       memory->grow(atom->extra,nmax,atom->nextra_store,"atom:extra");
   }
-
+  sync(Host,X_MASK | V_MASK | TAG_MASK | TYPE_MASK |
+       MASK_MASK | IMAGE_MASK | Q_MASK | MOLECULE_MASK | BOND_MASK |
+       ANGLE_MASK | DIHEDRAL_MASK | IMPROPER_MASK | SPECIAL_MASK);
   modified(Host,X_MASK | V_MASK | TAG_MASK | TYPE_MASK |
            MASK_MASK | IMAGE_MASK | Q_MASK | MOLECULE_MASK | BOND_MASK |
            ANGLE_MASK | DIHEDRAL_MASK | IMPROPER_MASK | SPECIAL_MASK);
@@ -1923,7 +1890,7 @@ int AtomVecFullKokkos::unpack_restart(double *buf)
 
   double **extra = atom->extra;
   if (atom->nextra_store) {
-    int size = static_cast<int> (ubuf(buf[m++]).i) - m;
+    int size = static_cast<int> (buf[0]) - m;
     for (int i = 0; i < size; i++) extra[nlocal][i] = buf[m++];
   }
 
@@ -1943,6 +1910,7 @@ void AtomVecFullKokkos::create_atom(int itype, double *coord)
     atomKK->modified(Host,ALL_MASK);
     grow(0);
   }
+  atomKK->sync(Host,ALL_MASK);
   atomKK->modified(Host,ALL_MASK);
 
   tag[nlocal] = 0;
@@ -2234,6 +2202,157 @@ void AtomVecFullKokkos::sync(ExecutionSpace space, unsigned int mask)
 
 /* ---------------------------------------------------------------------- */
 
+void AtomVecFullKokkos::sync_overlapping_device(ExecutionSpace space, unsigned int mask)
+{
+  if (space == Device) {
+    if ((mask & X_MASK) && atomKK->k_x.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_x_array>(atomKK->k_x,space);
+    if ((mask & V_MASK) && atomKK->k_v.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_v_array>(atomKK->k_v,space);
+    if ((mask & F_MASK) && atomKK->k_f.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_f_array>(atomKK->k_f,space);
+    if ((mask & TAG_MASK) && atomKK->k_tag.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_tag,space);
+    if ((mask & TYPE_MASK) && atomKK->k_type.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_type,space);
+    if ((mask & MASK_MASK) && atomKK->k_mask.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_mask,space);
+    if ((mask & IMAGE_MASK) && atomKK->k_image.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_imageint_1d>(atomKK->k_image,space);
+    if ((mask & Q_MASK) && atomKK->k_q.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_float_1d>(atomKK->k_q,space);
+    if ((mask & MOLECULE_MASK) && atomKK->k_molecule.need_sync<LMPDeviceType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_molecule,space);
+    if (mask & SPECIAL_MASK) {
+      if (atomKK->k_nspecial.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_nspecial,space);
+      if (atomKK->k_special.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_special,space);
+    }
+    if (mask & BOND_MASK) {
+      if (atomKK->k_num_bond.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_bond,space);
+      if (atomKK->k_bond_type.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_bond_type,space);
+      if (atomKK->k_bond_atom.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_bond_atom,space);
+    }
+    if (mask & ANGLE_MASK) {
+      if (atomKK->k_num_angle.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_angle,space);
+      if (atomKK->k_angle_type.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_angle_type,space);
+      if (atomKK->k_angle_atom1.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom1,space);
+      if (atomKK->k_angle_atom2.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom2,space);
+      if (atomKK->k_angle_atom3.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom3,space);
+    }
+    if (mask & DIHEDRAL_MASK) {
+      if (atomKK->k_num_dihedral.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_dihedral,space);
+      if (atomKK->k_dihedral_type.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_dihedral_type,space);
+      if (atomKK->k_dihedral_atom1.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom1,space);
+      if (atomKK->k_dihedral_atom2.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom2,space);
+      if (atomKK->k_dihedral_atom3.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom3,space);
+    }
+    if (mask & IMPROPER_MASK) {
+      if (atomKK->k_num_improper.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_improper,space);
+      if (atomKK->k_improper_type.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_improper_type,space);
+      if (atomKK->k_improper_atom1.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom1,space);
+      if (atomKK->k_improper_atom2.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom2,space);
+      if (atomKK->k_improper_atom3.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom3,space);
+      if (atomKK->k_improper_atom4.need_sync<LMPDeviceType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom4,space);
+    }
+  } else {
+    if ((mask & X_MASK) && atomKK->k_x.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_x_array>(atomKK->k_x,space);
+    if ((mask & V_MASK) && atomKK->k_v.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_v_array>(atomKK->k_v,space);
+    if ((mask & F_MASK) && atomKK->k_f.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_f_array>(atomKK->k_f,space);
+    if ((mask & TAG_MASK) && atomKK->k_tag.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_tag,space);
+    if ((mask & TYPE_MASK) && atomKK->k_type.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_type,space);
+    if ((mask & MASK_MASK) && atomKK->k_mask.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_int_1d>(atomKK->k_mask,space);
+    if ((mask & IMAGE_MASK) && atomKK->k_image.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_imageint_1d>(atomKK->k_image,space);
+    if ((mask & Q_MASK) && atomKK->k_q.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_float_1d>(atomKK->k_q,space);
+    if ((mask & MOLECULE_MASK) && atomKK->k_molecule.need_sync<LMPHostType>())
+      perform_async_copy<DAT::tdual_tagint_1d>(atomKK->k_molecule,space);
+    if (mask & SPECIAL_MASK) {
+      if (atomKK->k_nspecial.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_nspecial,space);
+      if (atomKK->k_special.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_special,space);
+    }
+    if (mask & BOND_MASK) {
+      if (atomKK->k_num_bond.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_bond,space);
+      if (atomKK->k_bond_type.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_bond_type,space);
+      if (atomKK->k_bond_atom.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_bond_atom,space);
+    }
+    if (mask & ANGLE_MASK) {
+      if (atomKK->k_num_angle.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_angle,space);
+      if (atomKK->k_angle_type.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_angle_type,space);
+      if (atomKK->k_angle_atom1.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom1,space);
+      if (atomKK->k_angle_atom2.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom2,space);
+      if (atomKK->k_angle_atom3.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_angle_atom3,space);
+    }
+    if (mask & DIHEDRAL_MASK) {
+      if (atomKK->k_num_dihedral.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_dihedral,space);
+      if (atomKK->k_dihedral_type.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_dihedral_type,space);
+      if (atomKK->k_dihedral_atom1.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom1,space);
+      if (atomKK->k_dihedral_atom2.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom2,space);
+      if (atomKK->k_dihedral_atom3.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom3,space);
+      if (atomKK->k_dihedral_atom4.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_dihedral_atom4,space);
+    }
+    if (mask & IMPROPER_MASK) {
+      if (atomKK->k_num_improper.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_1d>(atomKK->k_num_improper,space);
+      if (atomKK->k_improper_type.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_int_2d>(atomKK->k_improper_type,space);
+      if (atomKK->k_improper_atom1.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom1,space);
+      if (atomKK->k_improper_atom2.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom2,space);
+      if (atomKK->k_improper_atom3.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom3,space);
+      if (atomKK->k_improper_atom4.need_sync<LMPHostType>())
+        perform_async_copy<DAT::tdual_tagint_2d>(atomKK->k_improper_atom4,space);
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+
 void AtomVecFullKokkos::modified(ExecutionSpace space, unsigned int mask)
 {
   if (space == Device) {
@@ -2322,3 +2441,4 @@ void AtomVecFullKokkos::modified(ExecutionSpace space, unsigned int mask)
     }
   }
 }
+

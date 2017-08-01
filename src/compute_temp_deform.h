@@ -34,8 +34,10 @@ class ComputeTempDeform : public Compute {
   virtual void compute_vector();
 
   void remove_bias(int, double *);
+  void remove_bias_thr(int, double *, double *);
   void remove_bias_all();
   void restore_bias(int, double *);
+  void restore_bias_thr(int, double *, double *);
   void restore_bias_all();
   double memory_usage();
 
@@ -67,5 +69,10 @@ W: Using compute temp/deform with no fix deform defined
 
 This is probably an error, since it makes little sense to use
 compute temp/deform in this case.
+
+E: Temperature compute degrees of freedom < 0
+
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

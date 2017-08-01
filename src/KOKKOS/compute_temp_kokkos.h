@@ -45,14 +45,13 @@ namespace LAMMPS_NS {
     }
 
     KOKKOS_INLINE_FUNCTION
-    volatile s_CTEMP& operator+=(const volatile s_CTEMP &rhs) volatile {
+    void operator+=(const volatile s_CTEMP &rhs) volatile {
       t0 += rhs.t0;
       t1 += rhs.t1;
       t2 += rhs.t2;
       t3 += rhs.t3;
       t4 += rhs.t4;
       t5 += rhs.t5;
-      return *this;
     }
   };
   typedef s_CTEMP CTEMP;
@@ -98,10 +97,9 @@ class ComputeTempKokkos : public ComputeTemp {
 
 /* ERROR/WARNING messages:
 
-E: Illegal ... command
+E: Temperature compute degrees of freedom < 0
 
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
+This should not happen if you are calculating the temperature
+on a valid set of atoms.
 
 */

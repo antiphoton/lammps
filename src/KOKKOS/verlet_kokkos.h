@@ -21,6 +21,7 @@ IntegrateStyle(verlet/kk,VerletKokkos)
 #define LMP_VERLET_KOKKOS_H
 
 #include "verlet.h"
+#include "kokkos_type.h"
 
 namespace LAMMPS_NS {
 
@@ -28,12 +29,20 @@ class VerletKokkos : public Verlet {
  public:
   VerletKokkos(class LAMMPS *, int, char **);
   ~VerletKokkos() {}
-  void setup();
+  void setup(int flag=1);
   void setup_minimal(int);
   void run(int);
 
- protected:
+  KOKKOS_INLINE_FUNCTION
+  void operator() (const int& i) const {
+    f(i,0) += f_merge_copy(i,0);
+    f(i,1) += f_merge_copy(i,1);
+    f(i,2) += f_merge_copy(i,2);
+  }
 
+
+ protected:
+  DAT::t_f_array f_merge_copy,f;
 
   void force_clear();
 };

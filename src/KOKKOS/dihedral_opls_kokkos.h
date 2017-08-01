@@ -13,9 +13,9 @@
 
 #ifdef DIHEDRAL_CLASS
 
-DihedralStyle(charmm/kk,DihedralOPLSKokkos<LMPDeviceType>)
-DihedralStyle(charmm/kk/device,DihedralOPLSKokkos<LMPDeviceType>)
-DihedralStyle(charmm/kk/host,DihedralOPLSKokkos<LMPHostType>)
+DihedralStyle(opls/kk,DihedralOPLSKokkos<LMPDeviceType>)
+DihedralStyle(opls/kk/device,DihedralOPLSKokkos<LMPDeviceType>)
+DihedralStyle(opls/kk/host,DihedralOPLSKokkos<LMPHostType>)
 
 #else
 
@@ -68,8 +68,8 @@ class DihedralOPLSKokkos : public DihedralOPLS {
 
   DAT::tdual_efloat_1d k_eatom;
   DAT::tdual_virial_array k_vatom;
-  DAT::t_efloat_1d d_eatom;
-  DAT::t_virial_array d_vatom;
+  typename ArrayTypes<DeviceType>::t_efloat_1d d_eatom;
+  typename ArrayTypes<DeviceType>::t_virial_array d_vatom;
 
   int nlocal,newton_bond;
   int eflag,vflag;

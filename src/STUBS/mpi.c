@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------ */
 
 /* Single-processor "stub" versions of MPI routines */
+/* -I. in Makefile insures dummy mpi.h in this dir is included */
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/time.h>
-#include "mpi.h"
+#include <mpi.h>
 
 /* data structure for double/int */
 
@@ -189,7 +190,14 @@ int MPI_Type_size(MPI_Datatype datatype, int *size)
 
 /* ---------------------------------------------------------------------- */
 
-int MPI_Send(void *buf, int count, MPI_Datatype datatype,
+int MPI_Request_free(MPI_Request *request)
+{
+  return 0;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int MPI_Send(const void *buf, int count, MPI_Datatype datatype,
              int dest, int tag, MPI_Comm comm)
 {
   printf("MPI Stub WARNING: Should not send message to self\n");
@@ -198,7 +206,7 @@ int MPI_Send(void *buf, int count, MPI_Datatype datatype,
 
 /* ---------------------------------------------------------------------- */
 
-int MPI_Isend(void *buf, int count, MPI_Datatype datatype,
+int MPI_Isend(const void *buf, int count, MPI_Datatype datatype,
               int source, int tag, MPI_Comm comm, MPI_Request *request)
 {
   printf("MPI Stub WARNING: Should not send message to self\n");
@@ -207,7 +215,7 @@ int MPI_Isend(void *buf, int count, MPI_Datatype datatype,
 
 /* ---------------------------------------------------------------------- */
 
-int MPI_Rsend(void *buf, int count, MPI_Datatype datatype,
+int MPI_Rsend(const void *buf, int count, MPI_Datatype datatype,
               int dest, int tag, MPI_Comm comm)
 {
   printf("MPI Stub WARNING: Should not rsend message to self\n");
@@ -259,7 +267,7 @@ int MPI_Waitany(int count, MPI_Request *request, int *index,
 
 /* ---------------------------------------------------------------------- */
 
-int MPI_Sendrecv(void *sbuf, int scount, MPI_Datatype sdatatype,
+int MPI_Sendrecv(const void *sbuf, int scount, MPI_Datatype sdatatype,
                  int dest, int stag, void *rbuf, int rcount,
                  MPI_Datatype rdatatype, int source, int rtag,
                  MPI_Comm comm, MPI_Status *status)

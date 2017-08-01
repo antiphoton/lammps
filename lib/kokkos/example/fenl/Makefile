@@ -1,31 +1,31 @@
-KOKKOS_PATH = ../..
+KOKKOS_PATH ?= ../..
 
-vpath %.cpp ${KOKKOS_PATH}/example/fixture ${KOKKOS_PATH}/example/fenl
+MAKEFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
+SRC_DIR := $(dir $(MAKEFILE_PATH))
 
-EXAMPLE_HEADERS = $(wildcard $(KOKKOS_PATH)/example/common/*.hpp ${KOKKOS_PATH}/example/fixture/*.hpp ${KOKKOS_PATH}/example/fenl/*.hpp)
+vpath %.cpp ${SRC_DIR}/../fixture ${SRC_DIR}
+
+EXAMPLE_HEADERS = $(wildcard $(SRC_DIR)/../common/*.hpp ${SRC_DIR}/../fixture/*.hpp ${SRC_DIR}/*.hpp)
 
 default: build_all
 	echo "End Build"
-        
-include $(KOKKOS_PATH)/Makefile.kokkos
 
-ifeq ($(KOKKOS_INTERNAL_USE_CUDA), 1)
-	CXX = nvcc_wrapper
-	CXXFLAGS ?= -O3
-	LINK = $(CXX)
-	LDFLAGS ?= -lpthread
+ifneq (,$(findstring Cuda,$(KOKKOS_DEVICES)))
+  CXX = $(KOKKOS_PATH)/bin/nvcc_wrapper
 else
-	CXX ?= g++
-	CXXFLAGS ?= -O3
-	LINK ?= $(CXX)
-	LDFLAGS ?= -lpthread
+  CXX = g++
 endif
 
-KOKKOS_CXXFLAGS +=	\
-	-I${KOKKOS_PATH}/example/common	\
-	-I${KOKKOS_PATH}/example/fixture	\
-	-I${KOKKOS_PATH}/example/fenl
+CXXFLAGS = -O3
+LINK ?= $(CXX)
+LDFLAGS ?=
 
+include $(KOKKOS_PATH)/Makefile.kokkos
+
+KOKKOS_CXXFLAGS +=	\
+	-I${SRC_DIR}/../common	\
+	-I${SRC_DIR}/../fixture	\
+	-I${SRC_DIR}
 
 EXE_EXAMPLE_FENL = KokkosExample_Fenl
 OBJ_EXAMPLE_FENL = BoxElemPart.o main.o fenl.o
@@ -39,12 +39,12 @@ $(EXE_EXAMPLE_FENL) : $(OBJ_EXAMPLE_FENL) $(KOKKOS_LINK_DEPENDS)
 
 build_all : $(TARGETS)
 
-
 test : build_all
 
+clean: kokkos-clean
+	rm -f *.o $(TARGETS)
 
 # Compilation rules
 
 %.o:%.cpp $(KOKKOS_CPP_DEPENDS) $(EXAMPLE_HEADERS)
 	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) -c $<
-

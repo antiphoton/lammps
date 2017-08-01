@@ -46,6 +46,10 @@
 
 #include <string>
 #include <iosfwd>
+#include <Kokkos_Macros.hpp>
+#ifdef KOKKOS_ENABLE_CUDA
+#include <Cuda/Kokkos_Cuda_abort.hpp>
+#endif
 
 namespace Kokkos {
 namespace Impl {
@@ -64,12 +68,20 @@ std::string human_memory_size(size_t arg_bytes);
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 
-#if defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_HOST )
+
 namespace Kokkos {
-inline
-void abort( const char * const message ) { Kokkos::Impl::host_abort(message); }
+KOKKOS_INLINE_FUNCTION
+void abort( const char * const message ) {
+#ifdef __CUDA_ARCH__
+  Kokkos::Impl::cuda_abort(message);
+#else
+  #ifndef KOKKOS_ENABLE_OPENMPTARGET
+    Kokkos::Impl::host_abort(message);
+  #endif
+#endif
 }
-#endif /* defined( KOKKOS_ACTIVE_EXECUTION_MEMORY_SPACE_CUDA ) */
+
+}
 
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------

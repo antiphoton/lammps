@@ -1,4 +1,4 @@
-/* ----------------------------------------------------------------------
+/* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
@@ -130,6 +130,10 @@ E: All atoms of a swapped type must have the same charge.
 Self-explanatory.
 
 E: At least one atom of each swapped type must be present to define charges.
+
+Self-explanatory.
+
+E: All atoms of a swapped type must have same charge.
 
 Self-explanatory.
 

@@ -45,6 +45,8 @@ ImproperClass2::ImproperClass2(LAMMPS *lmp) : Improper(lmp)
 
 ImproperClass2::~ImproperClass2()
 {
+  if (copymode) return;
+
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(setflag_i);
@@ -529,7 +531,7 @@ void ImproperClass2::coeff(int narg, char **arg)
   if (!allocated) allocate();
 
   int ilo,ihi;
-  force->bounds(arg[0],atom->nimpropertypes,ilo,ihi);
+  force->bounds(FLERR,arg[0],atom->nimpropertypes,ilo,ihi);
 
   int count = 0;
 
@@ -656,6 +658,9 @@ void ImproperClass2::angleangle(int eflag, int vflag)
     i3 = improperlist[n][2];
     i4 = improperlist[n][3];
     type = improperlist[n][4];
+
+    if ((aa_k1[type] == 0.0) && (aa_k2[type] == 0.0)
+        && (aa_k3[type] == 0.0)) continue;
 
     // difference vectors
 
@@ -816,7 +821,8 @@ void ImproperClass2::angleangle(int eflag, int vflag)
     if (evflag)
       ev_tally(i1,i2,i3,i4,nlocal,newton_bond,eimproper,
                fabcd[0],fabcd[2],fabcd[3],
-               delxAB,delyAB,delzAB,delxBC,delyBC,delzBC,delxBD,delyBD,delzBD);
+               delxAB,delyAB,delzAB,delxBC,delyBC,delzBC,
+               delxBD-delxBC,delyBD-delyBC,delzBD-delzBC);
   }
 }
 

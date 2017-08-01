@@ -1,4 +1,4 @@
-# intel_cpu = USER-INTEL package with CPU optimizations, Intel MPI, MKL FFT
+# intel_cpu_intelmpi = USER-INTEL package, Intel MPI, MKL FFT
 
 SHELL = /bin/sh
 
@@ -7,14 +7,15 @@ SHELL = /bin/sh
 # specify flags and libraries needed for your compiler
 
 CC =		mpiicpc 
-CCFLAGS =	-g -O3 -fopenmp -DLAMMPS_MEMALIGN=64 -no-offload \
-                -xHost -fno-alias -ansi-alias -restrict -override-limits
+OPTFLAGS =      -xHost -O2 -fp-model fast=2 -no-prec-div -qoverride-limits
+CCFLAGS =	-g -qopenmp -DLAMMPS_MEMALIGN=64 -no-offload \
+                -fno-alias -ansi-alias -restrict $(OPTFLAGS)
 SHFLAGS =	-fPIC
 DEPFLAGS =	-M
 
 LINK =		mpiicpc
-LINKFLAGS =	-g -O3 -fopenmp -xHost
-LIB =           
+LINKFLAGS =	-g -qopenmp $(OPTFLAGS)
+LIB =           -ltbbmalloc -ltbbmalloc_proxy
 SIZE =		size
 
 ARCHIVE =	ar
@@ -53,8 +54,8 @@ MPI_LIB =
 
 FFT_INC =       -DFFT_MKL -DFFT_SINGLE
 FFT_PATH = 
-FFT_LIB =       -L$MKLROOT/lib/intel64/ -lmkl_intel_ilp64 \
-                -lmkl_intel_thread -lmkl_core	
+FFT_LIB =       -L$(MKLROOT)/lib/intel64/ -lmkl_intel_ilp64 \
+                -lmkl_sequential -lmkl_core	
 
 # JPEG and/or PNG library
 # see discussion in Section 2.2 (step 7) of manual
@@ -113,5 +114,10 @@ shlib:	$(OBJ) $(EXTRA_LINK_DEPENDS)
 
 # Individual dependencies
 
-DEPENDS = $(OBJ:.o=.d)
-sinclude $(DEPENDS)
+depend : fastdep.exe $(SRC)
+	@./fastdep.exe $(EXTRA_INC) -- $^ > .depend || exit 1
+
+fastdep.exe: ../DEPEND/fastdep.c
+	cc -O -o $@ $<
+
+sinclude .depend

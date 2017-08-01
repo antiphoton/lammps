@@ -25,7 +25,10 @@ class FixNHSphere : public FixNH {
   void init();
 
  protected:
+  double inertia;
+
   void nve_v();
+  void nve_x();
   void nh_v_temp();
 };
 

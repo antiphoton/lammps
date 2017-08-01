@@ -23,7 +23,6 @@
 #include "force.h"
 #include "modify.h"
 #include "compute.h"
-#include "group.h"
 #include "input.h"
 #include "variable.h"
 #include "memory.h"
@@ -43,7 +42,12 @@ enum{SCALAR,VECTOR};
 /* ---------------------------------------------------------------------- */
 
 FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
-  Fix(lmp, narg, arg)
+  Fix(lmp, narg, arg),
+  nvalues(0), which(NULL), argindex(NULL), value2index(NULL), 
+  offcol(NULL), varlen(NULL), ids(NULL),
+  fp(NULL), offlist(NULL), format(NULL), format_user(NULL), 
+  vector(NULL), vector_total(NULL), vector_list(NULL),
+  column(NULL), array(NULL), array_total(NULL), array_list(NULL)
 {
   if (narg < 7) error->all(FLERR,"Illegal fix ave/time command");
 
@@ -54,6 +58,8 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
   nfreq = force->inumeric(FLERR,arg[5]);
 
   global_freq = nfreq;
+
+  dynamic_group_allow = 1;
 
   // scan values to count them
   // then read options so know mode = SCALAR/VECTOR before re-reading values
@@ -72,89 +78,48 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
 
   if (nvalues == 0) error->all(FLERR,"No values in fix ave/time command");
 
-  options(narg,arg);
+  options(iarg,narg,arg);
 
-  // parse values until one isn't recognized
-  // if mode = VECTOR and value is a global array:
-  //   expand it as if columns listed one by one
-  //   adjust nvalues accordingly via maxvalues
+  // expand args if any have wildcard character "*"
+  // this can reset nvalues
 
-  which = argindex = value2index = offcol = varlen = NULL;
-  ids = NULL;
-  int maxvalues = nvalues;
-  allocate_values(maxvalues);
-  nvalues = 0;
+  int expand = 0;
+  char **earg;
+  nvalues = input->expand_args(nvalues,&arg[6],mode,earg);
 
-  iarg = 6;
-  while (iarg < narg) {
-    if (strncmp(arg[iarg],"c_",2) == 0 ||
-        strncmp(arg[iarg],"f_",2) == 0 ||
-        strncmp(arg[iarg],"v_",2) == 0) {
-      if (arg[iarg][0] == 'c') which[nvalues] = COMPUTE;
-      else if (arg[iarg][0] == 'f') which[nvalues] = FIX;
-      else if (arg[iarg][0] == 'v') which[nvalues] = VARIABLE;
+  if (earg != &arg[6]) expand = 1;
+  arg = earg;
 
-      int n = strlen(arg[iarg]);
-      char *suffix = new char[n];
-      strcpy(suffix,&arg[iarg][2]);
+  // parse values
 
-      char *ptr = strchr(suffix,'[');
-      if (ptr) {
-        if (suffix[strlen(suffix)-1] != ']')
-          error->all(FLERR,"Illegal fix ave/time command");
-        argindex[nvalues] = atoi(ptr+1);
-        *ptr = '\0';
-      } else argindex[nvalues] = 0;
+  which = new int[nvalues];
+  argindex = new int[nvalues];
+  value2index = new int[nvalues];
+  offcol = new int[nvalues];
+  varlen = new int[nvalues];
+  ids = new char*[nvalues];
 
-      n = strlen(suffix) + 1;
-      ids[nvalues] = new char[n];
-      strcpy(ids[nvalues],suffix);
-      delete [] suffix;
+  for (int i = 0; i < nvalues; i++) {
+    if (arg[i][0] == 'c') which[i] = COMPUTE;
+    else if (arg[i][0] == 'f') which[i] = FIX;
+    else if (arg[i][0] == 'v') which[i] = VARIABLE;
 
-      if (mode == VECTOR && which[nvalues] == COMPUTE &&
-          argindex[nvalues] == 0) {
-        int icompute = modify->find_compute(ids[nvalues]);
-        if (icompute < 0)
-          error->all(FLERR,"Compute ID for fix ave/time does not exist");
-        if (modify->compute[icompute]->array_flag) {
-          int ncols = modify->compute[icompute]->size_array_cols;
-          maxvalues += ncols-1;
-          allocate_values(maxvalues);
-          argindex[nvalues] = 1;
-          for (int icol = 1; icol < ncols; icol++) {
-            which[nvalues+icol] = which[nvalues];
-            argindex[nvalues+icol] = icol+1;
-            n = strlen(ids[nvalues]) + 1;
-            ids[nvalues+icol] = new char[n];
-            strcpy(ids[nvalues+icol],ids[nvalues]);
-          }
-          nvalues += ncols-1;
-        }
+    int n = strlen(arg[i]);
+    char *suffix = new char[n];
+    strcpy(suffix,&arg[i][2]);
 
-      } else if (mode == VECTOR && which[nvalues] == FIX &&
-                 argindex[nvalues] == 0) {
-        int ifix = modify->find_fix(ids[nvalues]);
-        if (ifix < 0)
-          error->all(FLERR,"Fix ID for fix ave/time does not exist");
-        if (modify->fix[ifix]->array_flag) {
-          int ncols = modify->fix[ifix]->size_array_cols;
-          maxvalues += ncols-1;
-          allocate_values(maxvalues);
-          argindex[nvalues] = 1;
-          for (int icol = 1; icol < ncols; icol++) {
-            which[nvalues+icol] = which[nvalues];
-            argindex[nvalues+icol] = icol+1;
-            n = strlen(ids[nvalues]) + 1;
-            ids[nvalues+icol] = new char[n];
-            strcpy(ids[nvalues+icol],ids[nvalues]);
-          }
-          nvalues += ncols-1;
-        }
-      }
-
-      nvalues++;
-      iarg++;
-    } else break;
+    char *ptr = strchr(suffix,'[');
+    if (ptr) {
+      if (suffix[strlen(suffix)-1] != ']')
+        error->all(FLERR,"Illegal fix ave/time command");
+      argindex[i] = atoi(ptr+1);
+      *ptr = '\0';
+    } else argindex[i] = 0;
+    
+    n = strlen(suffix) + 1;
+    ids[i] = new char[n];
+    strcpy(ids[i],suffix);
+    delete [] suffix;
   }
 
   // set off columns now that nvalues is finalized
@@ -172,7 +137,7 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
 
   if (nevery <= 0 || nrepeat <= 0 || nfreq <= 0)
     error->all(FLERR,"Illegal fix ave/time command");
-  if (nfreq % nevery || (nrepeat-1)*nevery >= nfreq)
+  if (nfreq % nevery || nrepeat*nevery > nfreq)
     error->all(FLERR,"Illegal fix ave/time command");
   if (ave != RUNNING && overwrite)
     error->all(FLERR,"Illegal fix ave/time command");
@@ -243,14 +208,24 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
         error->all(FLERR,
                    "Fix for fix ave/time not computed at compatible time");
 
-    } else if (which[i] == VARIABLE) {
+    } else if (which[i] == VARIABLE && mode == SCALAR) {
       int ivariable = input->variable->find(ids[i]);
       if (ivariable < 0)
         error->all(FLERR,"Variable name for fix ave/time does not exist");
-      if (input->variable->equalstyle(ivariable) == 0)
+      if (argindex[i] == 0 && input->variable->equalstyle(ivariable) == 0)
         error->all(FLERR,"Fix ave/time variable is not equal-style variable");
-      if (mode == VECTOR)
-        error->all(FLERR,"Fix ave/time cannot use variable with vector mode");
+      if (argindex[i] && input->variable->vectorstyle(ivariable) == 0)
+        error->all(FLERR,"Fix ave/time variable is not vector-style variable");
+
+    } else if (which[i] == VARIABLE && mode == VECTOR) {
+      int ivariable = input->variable->find(ids[i]);
+      if (ivariable < 0)
+        error->all(FLERR,"Variable name for fix ave/time does not exist");
+      if (argindex[i] == 0 && input->variable->vectorstyle(ivariable) == 0)
+        error->all(FLERR,"Fix ave/time variable is not vector-style variable");
+      if (argindex[i])
+        error->all(FLERR,"Fix ave/time mode vector variable cannot be indexed");
+      varlen[i] = 1;
     }
   }
 
@@ -282,7 +257,7 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
   if (any_variable_length &&
       (nrepeat > 1 || ave == RUNNING || ave == WINDOW)) {
     for (int i = 0; i < nvalues; i++)
-      if (varlen[i]) {
+      if (varlen[i] && which[i] == COMPUTE) {
         int icompute = modify->find_compute(ids[i]);
         modify->compute[icompute]->lock_enable();
       }
@@ -300,18 +275,13 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
     if (title2) fprintf(fp,"%s\n",title2);
     else if (mode == SCALAR) {
       fprintf(fp,"# TimeStep");
-      for (int i = 0; i < nvalues; i++) fprintf(fp," %s",arg[6+i]);
+      for (int i = 0; i < nvalues; i++) fprintf(fp," %s",earg[i]);
       fprintf(fp,"\n");
     } else fprintf(fp,"# TimeStep Number-of-rows\n");
     if (title3 && mode == VECTOR) fprintf(fp,"%s\n",title3);
     else if (mode == VECTOR) {
       fprintf(fp,"# Row");
-      for (int i = 0; i < nvalues; i++) {
-        if (which[i] == COMPUTE) fprintf(fp," c_%s",ids[i]);
-        else if (which[i] == FIX) fprintf(fp," f_%s",ids[i]);
-        else if (which[i] == VARIABLE) fprintf(fp," v_%s",ids[i]);
-        if (argindex[i]) fprintf(fp,"[%d]",argindex[i]);
-      }
+      for (int i = 0; i < nvalues; i++) fprintf(fp," %s",earg[i]);
       fprintf(fp,"\n");
     }
     if (ferror(fp))
@@ -323,6 +293,14 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
   delete [] title1;
   delete [] title2;
   delete [] title3;
+
+  // if wildcard expansion occurred, free earg memory from expand_args()
+  // wait to do this until after file comment lines are printed
+
+  if (expand) {
+    for (int i = 0; i < nvalues; i++) delete [] earg[i];
+    memory->sfree(earg);
+  }
 
   // allocate memory for averaging
 
@@ -358,8 +336,9 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
         if (argindex[0] == 0) extscalar = fix->extscalar;
         else if (fix->extvector >= 0) extscalar = fix->extvector;
         else extscalar = fix->extlist[argindex[0]-1];
-      } else if (which[0] == VARIABLE)
+      } else if (which[0] == VARIABLE) {
         extscalar = 0;
+      }
 
     } else {
       vector_flag = 1;
@@ -377,8 +356,9 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
           if (argindex[i] == 0) extlist[i] = fix->extscalar;
           else if (fix->extvector >= 0) extlist[i] = fix->extvector;
           else extlist[i] = fix->extlist[argindex[i]-1];
-        } else if (which[i] == VARIABLE)
+        } else if (which[i] == VARIABLE) {
           extlist[i] = 0;
+        }
       }
     }
 
@@ -405,6 +385,9 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
             for (int i = 0; i < nrows; i++) extlist[i] = fix->extlist[i];
           }
         } else extvector = fix->extarray;
+      } else if (which[0] == VARIABLE) {
+        extlist = new int[nrows];
+        for (int i = 0; i < nrows; i++) extlist[i] = 0;
       }
 
     } else {
@@ -422,6 +405,8 @@ FixAveTime::FixAveTime(LAMMPS *lmp, int narg, char **arg) :
           Fix *fix = modify->fix[modify->find_fix(ids[i])];
           if (argindex[i] == 0) value = fix->extvector;
           else value = fix->extarray;
+        } else if (which[i] == VARIABLE) {
+          value = 0;
         }
         if (value == -1)
           error->all(FLERR,"Fix ave/time cannot set output array "
@@ -476,13 +461,13 @@ FixAveTime::~FixAveTime()
 
   delete [] format_user;
 
-  memory->destroy(which);
-  memory->destroy(argindex);
-  memory->destroy(value2index);
-  memory->destroy(offcol);
-  memory->destroy(varlen);
+  delete [] which;
+  delete [] argindex;
+  delete [] value2index;
+  delete [] offcol;
+  delete [] varlen;
   for (int i = 0; i < nvalues; i++) delete [] ids[i];
-  memory->sfree(ids);
+  delete [] ids;
 
   delete [] extlist;
 
@@ -518,13 +503,11 @@ void FixAveTime::init()
       if (icompute < 0)
         error->all(FLERR,"Compute ID for fix ave/time does not exist");
       value2index[i] = icompute;
-
     } else if (which[i] == FIX) {
       int ifix = modify->find_fix(ids[i]);
       if (ifix < 0)
         error->all(FLERR,"Fix ID for fix ave/time does not exist");
       value2index[i] = ifix;
-
     } else if (which[i] == VARIABLE) {
       int ivariable = input->variable->find(ids[i]);
       if (ivariable < 0)
@@ -576,8 +559,7 @@ void FixAveTime::invoke_scalar(bigint ntimestep)
   double scalar;
 
   // zero if first sample within single Nfreq epoch
-  // NOTE: doc this
-  // are not checking for returned length, just initialize it
+  // if any input is variable length, initialize current length
   // check for exceeding length is done below
 
   if (irepeat == 0) {
@@ -599,6 +581,7 @@ void FixAveTime::invoke_scalar(bigint ntimestep)
     m = value2index[i];
 
     // invoke compute if not previously invoked
+    // insure no out-of-range access to variable-length compute vector
 
     if (which[i] == COMPUTE) {
       Compute *compute = modify->compute[m];
@@ -614,9 +597,6 @@ void FixAveTime::invoke_scalar(bigint ntimestep)
           compute->compute_vector();
           compute->invoked_flag |= INVOKED_VECTOR;
         }
-
-        // insure no out-of-range access to variable-length compute vector
-
         if (varlen[i] && compute->size_vector < argindex[i]) scalar = 0.0;
         else scalar = compute->vector[argindex[i]-1];
       }
@@ -629,10 +609,19 @@ void FixAveTime::invoke_scalar(bigint ntimestep)
       else
         scalar = modify->fix[m]->compute_vector(argindex[i]-1);
 
-    // evaluate equal-style variable
+    // evaluate equal-style or vector-style variable
+    // insure no out-of-range access to vector-style variable
 
-    } else if (which[i] == VARIABLE)
-      scalar = input->variable->compute_equal(m);
+    } else if (which[i] == VARIABLE) {
+      if (argindex[i] == 0)
+        scalar = input->variable->compute_equal(m);
+      else {
+        double *varvec;
+        int nvec = input->variable->compute_vector(m,&varvec);
+        if (nvec < argindex[i]) scalar = 0.0;
+        else scalar = varvec[argindex[i]-1];
+      }
+    }
 
     // add value to vector or just set directly if offcol is set
 
@@ -750,7 +739,7 @@ void FixAveTime::invoke_vector(bigint ntimestep)
       bigint ntimestep = update->ntimestep;
       int lockforever_flag = 0;
       for (i = 0; i < nvalues; i++) {
-        if (!varlen[i]) continue;
+        if (!varlen[i] || which[i] != COMPUTE) continue;
         if (nrepeat > 1 && ave == ONE) {
           Compute *compute = modify->compute[value2index[i]];
           compute->lock(this,ntimestep,ntimestep+(nrepeat-1)*nevery);
@@ -812,6 +801,18 @@ void FixAveTime::invoke_vector(bigint ntimestep)
         for (i = 0; i < nrows; i++)
           column[i] = fix->compute_array(i,icol);
       }
+
+    // evaluate vector-style variable
+    // insure nvec = nrows, else error
+    // could be different on this timestep than when column_length(1) set nrows
+
+    } else if (which[j] == VARIABLE) {
+      double *varvec;
+      int nvec = input->variable->compute_vector(m,&varvec);
+      if (nvec != nrows) 
+        error->all(FLERR,"Fix ave/time vector-style variable changed length");
+      for (i = 0; i < nrows; i++)
+        column[i] = varvec[i];
     }
 
     // add columns of values to array or just set directly if offcol is set
@@ -933,9 +934,11 @@ int FixAveTime::column_length(int dynamic)
         else lengthone = modify->compute[icompute]->size_array_rows;
       } else if (which[i] == FIX) {
         int ifix = modify->find_fix(ids[i]);
-        if (argindex[i] == 0) length = modify->fix[ifix]->size_vector;
-        else length = modify->fix[ifix]->size_array_rows;
-      }
+        if (argindex[i] == 0) lengthone = modify->fix[ifix]->size_vector;
+        else lengthone = modify->fix[ifix]->size_array_rows;
+      } else if (which[i] == VARIABLE) {
+        // variables are always varlen = 1, so dynamic
+      } 
       if (length == 0) length = lengthone;
       else if (lengthone != length)
         error->all(FLERR,"Fix ave/time columns are inconsistent lengths");
@@ -945,15 +948,20 @@ int FixAveTime::column_length(int dynamic)
   // determine new nrows for dynamic values
   // either all must be the same
   // or must match other static values
-  // don't need to check if not MODE = VECTOR, just inovke lock_length()
+  // don't need to check if not MODE = VECTOR, just invoke lock_length()
 
   if (dynamic) {
     length = 0;
     for (int i = 0; i < nvalues; i++) {
       if (varlen[i] == 0) continue;
       m = value2index[i];
-      Compute *compute = modify->compute[m];
-      lengthone = compute->lock_length();
+      if (which[i] == COMPUTE) {
+        Compute *compute = modify->compute[m];
+        lengthone = compute->lock_length();
+      } else if (which[i] == VARIABLE) {
+        double *varvec;
+        lengthone = input->variable->compute_vector(m,&varvec);
+      }
       if (mode == SCALAR) continue;
       if (all_variable_length) {
         if (length == 0) length = lengthone;
@@ -988,7 +996,7 @@ double FixAveTime::compute_vector(int i)
   if (i >= nrows) return 0.0;
   if (norm) {
     if (mode == SCALAR) return vector_total[i]/norm;
-    if (mode == VECTOR) return array_total[i][0];
+    if (mode == VECTOR) return array_total[i][0]/norm;
   }
   return 0.0;
 }
@@ -1008,7 +1016,7 @@ double FixAveTime::compute_array(int i, int j)
    parse optional args
 ------------------------------------------------------------------------- */
 
-void FixAveTime::options(int narg, char **arg)
+void FixAveTime::options(int iarg, int narg, char **arg)
 {
   // option defaults
 
@@ -1027,7 +1035,6 @@ void FixAveTime::options(int narg, char **arg)
 
   // optional args
 
-  int iarg = 6 + nvalues;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"file") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix ave/time command");
@@ -1102,20 +1109,6 @@ void FixAveTime::options(int narg, char **arg)
       iarg += 2;
     } else error->all(FLERR,"Illegal fix ave/time command");
   }
-}
-
-/* ----------------------------------------------------------------------
-   reallocate vectors for N input values
-------------------------------------------------------------------------- */
-
-void FixAveTime::allocate_values(int n)
-{
-  memory->grow(which,n,"ave/time:which");
-  memory->grow(argindex,n,"ave/time:argindex");
-  memory->grow(value2index,n,"ave/time:value2index");
-  memory->grow(offcol,n,"ave/time:offcol");
-  memory->grow(varlen,n,"ave/time:varlen");
-  ids = (char **) memory->srealloc(ids,n*sizeof(char *),"ave/time:ids");
 }
 
 /* ----------------------------------------------------------------------

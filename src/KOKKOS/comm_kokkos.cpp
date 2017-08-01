@@ -43,27 +43,18 @@ enum{SINGLE,MULTI};
 
 CommKokkos::CommKokkos(LAMMPS *lmp) : CommBrick(lmp)
 {
-  sendlist = NULL;  // need to free this since parent allocated?
+  if (sendlist) for (int i = 0; i < maxswap; i++) memory->destroy(sendlist[i]);
+  memory->sfree(sendlist);
+  sendlist = NULL;
   k_sendlist = ArrayTypes<LMPDeviceType>::tdual_int_2d();
 
   // error check for disallow of OpenMP threads?
 
   // initialize comm buffers & exchange memory
 
-  // maxsend = BUFMIN;
-  // k_buf_send = ArrayTypes<LMPDeviceType>::
-  //   tdual_xfloat_2d("comm:k_buf_send",(maxsend+BUFEXTRA+5)/6,6);
-  // buf_send = k_buf_send.view<LMPHostType>().ptr_on_device();
-
-  maxsend = 0;
+  memory->destroy(buf_send);
   buf_send = NULL;
-
-  // maxrecv = BUFMIN;
-  // k_buf_recv = ArrayTypes<LMPDeviceType>::
-  //   tdual_xfloat_2d("comm:k_buf_recv",(maxrecv+5)/6,6);
-  // buf_recv = k_buf_recv.view<LMPHostType>().ptr_on_device();
-
-  maxrecv = 0;
+  memory->destroy(buf_recv);
   buf_recv = NULL;
 
   k_exchange_sendlist = ArrayTypes<LMPDeviceType>::
@@ -73,13 +64,17 @@ CommKokkos::CommKokkos(LAMMPS *lmp) : CommBrick(lmp)
   k_count = ArrayTypes<LMPDeviceType>::tdual_int_1d("comm:k_count",1);
   k_sendflag = ArrayTypes<LMPDeviceType>::tdual_int_1d("comm:k_sendflag",100);
 
-  // next line is bogus?
-
+  memory->destroy(maxsendlist);
+  maxsendlist = NULL;
   memory->create(maxsendlist,maxswap,"comm:maxsendlist");
   for (int i = 0; i < maxswap; i++) {
     maxsendlist[i] = BUFMIN;
   }
   memory->create_kokkos(k_sendlist,sendlist,maxswap,BUFMIN,"comm:sendlist");
+
+  max_buf_pair = 0;
+  k_buf_send_pair = DAT::tdual_xfloat_1d("comm:k_buf_send_pair",1);
+  k_buf_recv_pair = DAT::tdual_xfloat_1d("comm:k_recv_send_pair",1);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -87,14 +82,23 @@ CommKokkos::CommKokkos(LAMMPS *lmp) : CommBrick(lmp)
 CommKokkos::~CommKokkos()
 {
   memory->destroy_kokkos(k_sendlist,sendlist);
+  sendlist = NULL;
   memory->destroy_kokkos(k_buf_send,buf_send);
+  buf_send = NULL;
   memory->destroy_kokkos(k_buf_recv,buf_recv);
+  buf_recv = NULL;
 }
 
 /* ---------------------------------------------------------------------- */
 
 void CommKokkos::init()
 {
+  maxsend = BUFMIN;
+  maxrecv = BUFMIN;
+
+  grow_send_kokkos(maxsend+bufextra,0,Host);
+  grow_recv_kokkos(maxrecv,Host);
+
   atomKK = (AtomKokkos *) atom;
   exchange_comm_classic = lmp->kokkos->exchange_comm_classic;
   forward_comm_classic = lmp->kokkos->forward_comm_classic;
@@ -105,9 +109,9 @@ void CommKokkos::init()
 
   int check_forward = 0;
   int check_reverse = 0;
-  if (force->pair && !force->pair->execution_space == Device)
+  if (force->pair && (force->pair->execution_space == Host))
     check_forward += force->pair->comm_forward;
-  if (force->pair && !force->pair->execution_space == Device)
+  if (force->pair && (force->pair->execution_space == Host))
     check_reverse += force->pair->comm_reverse;
 
   for (int i = 0; i < modify->nfix; i++) {
@@ -303,9 +307,13 @@ void CommKokkos::forward_comm_pair_device(Pair *pair)
   int nsize = pair->comm_forward;
 
   for (iswap = 0; iswap < nswap; iswap++) {
+    int n = MAX(max_buf_pair,nsize*sendnum[iswap]);
+    n = MAX(n,nsize*recvnum[iswap]);
+    if (n > max_buf_pair)
+      grow_buf_pair(n);
+  }
 
-    DAT::tdual_xfloat_1d k_buf_send_pair = DAT::tdual_xfloat_1d("comm:k_buf_send_pair",nsize*sendnum[iswap]);
-    DAT::tdual_xfloat_1d k_buf_recv_pair = DAT::tdual_xfloat_1d("comm:k_recv_send_pair",nsize*recvnum[iswap]);
+  for (iswap = 0; iswap < nswap; iswap++) {
 
     // pack buffer
 
@@ -328,6 +336,12 @@ void CommKokkos::forward_comm_pair_device(Pair *pair)
 
     pair->unpack_forward_comm_kokkos(recvnum[iswap],firstrecv[iswap],k_buf_recv_pair);
   }
+}
+
+void CommKokkos::grow_buf_pair(int n) {
+  max_buf_pair = n * BUFFACTOR;
+  k_buf_send_pair.resize(max_buf_pair);
+  k_buf_recv_pair.resize(max_buf_pair);
 }
 
 void CommKokkos::reverse_comm_pair(Pair *pair)
@@ -364,11 +378,11 @@ void CommKokkos::exchange()
   if(atom->nextra_grow + atom->nextra_border) {
     if(!exchange_comm_classic) {
       static int print = 1;
-      if(print) {
+      if(print && comm->me==0) {
         error->warning(FLERR,"Fixes cannot send data in Kokkos communication, "
 		       "switching to classic communication");
-        print = 0;
       }
+      print = 0;
       exchange_comm_classic = true;
     }
   }
@@ -496,6 +510,7 @@ void CommKokkos::exchange_device()
           k_count.h_view(0)=k_exchange_sendlist.h_view.dimension_0();
         }
       }
+      k_exchange_copylist.sync<LMPHostType>();
       k_exchange_sendlist.sync<LMPHostType>();
       k_sendflag.sync<LMPHostType>();
 
@@ -512,6 +527,8 @@ void CommKokkos::exchange_device()
 
       k_exchange_copylist.modify<LMPHostType>();
       k_exchange_copylist.sync<DeviceType>();
+      nsend = k_count.h_view(0);
+      if (nsend > maxsend) grow_send_kokkos(nsend,1);
       nsend =
         avec->pack_exchange_kokkos(k_count.h_view(0),k_buf_send,
                                    k_exchange_sendlist,k_exchange_copylist,
@@ -613,9 +630,9 @@ void CommKokkos::borders()
   }
 
   atomKK->sync(Host,ALL_MASK);
-
-  k_sendlist.modify<LMPHostType>();
   atomKK->modified(Host,ALL_MASK);
+  k_sendlist.sync<LMPHostType>();
+  k_sendlist.modify<LMPHostType>();
   CommBrick::borders();
   k_sendlist.modify<LMPHostType>();
   atomKK->modified(Host,ALL_MASK);

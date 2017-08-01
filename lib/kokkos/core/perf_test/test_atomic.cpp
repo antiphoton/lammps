@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -167,7 +167,7 @@ T AddLoopSerial(int loop) {
   *data+=(T)1;
 
   T val = *data;
-  delete data;
+  delete [] data;
   return val;
 }
 
@@ -272,7 +272,7 @@ T CASLoopSerial(int loop) {
   }
 
   T val = *data;
-  delete data;
+  delete [] data;
   return val;
 }
 
@@ -373,8 +373,8 @@ T ExchLoopSerial(int loop) {
   }
 
   T val = *data2 + *data;
-  delete data;
-  delete data2;
+  delete [] data;
+  delete [] data2;
   return val;
 }
 
@@ -414,24 +414,27 @@ void Loop(int loop, int test, const char* type_name) {
 
   Kokkos::Impl::Timer timer;
   T res = LoopVariant<T>(loop,test);
-  double time1 = timer.seconds();
+  double time = timer.seconds();
 
   timer.reset();
   T resNonAtomic = LoopVariantNonAtomic<T>(loop,test);
-  double time2 = timer.seconds();
+  double timeNonAtomic = timer.seconds();
 
   timer.reset();
   T resSerial = LoopVariantSerial<T>(loop,test);
-  double time3 = timer.seconds();
+  double timeSerial = timer.seconds();
 
-  time1*=1e6/loop;
-  time2*=1e6/loop;
-  time3*=1e6/loop;
+  time         *=1e6/loop;
+  timeNonAtomic*=1e6/loop;
+  timeSerial   *=1e6/loop;
   //textcolor_standard();
   bool passed = true;
   if(resSerial!=res) passed = false;
   //if(!passed) textcolor(RESET,BLACK,YELLOW);
-  printf("%s Test %i %s  --- Loop: %i Value (S,A,NA): %e %e %e Time: %7.4e %7.4e %7.4e Size of Type %i)",type_name,test,passed?"PASSED":"FAILED",loop,1.0*resSerial,1.0*res,1.0*resNonAtomic,time1,time2,time3,(int)sizeof(T));
+  printf("%s Test %i %s  --- Loop: %i Value (S,A,NA): %e %e %e Time: %7.4e %7.4e %7.4e Size of Type %i)",
+         type_name,test,passed?"PASSED":"FAILED",loop,
+         1.0*resSerial,1.0*res,1.0*resNonAtomic,
+         timeSerial,time,timeNonAtomic,(int)sizeof(T));
   //if(!passed) textcolor_standard();
   printf("\n");
 }
@@ -452,7 +455,7 @@ void Test(int loop, int test, const char* type_name) {
 int main(int argc, char* argv[])
 {
   int type = -1;
-  int loop = 1000000;
+  int loop = 100000;
   int test = -1;
 
   for(int i=0;i<argc;i++)

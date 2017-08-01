@@ -47,6 +47,7 @@ class FixLangevin : public Fix {
 
  protected:
   int gjfflag,oflag,tallyflag,zeroflag,tbiasflag;
+  int flangevin_allocated;
   double ascale;
   double t_start,t_stop,t_period,t_target;
   double *gfactor1,*gfactor2,*ratio;
@@ -131,7 +132,7 @@ One of the particles has radius 0.0.
 
 E: Fix langevin angmom requires extended particles
 
-This fix option cannot be used with point paritlces.
+This fix option cannot be used with point particles.
 
 E: Cannot zero Langevin force of 0 atoms
 

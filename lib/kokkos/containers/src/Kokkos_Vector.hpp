@@ -1,13 +1,13 @@
 /*
 //@HEADER
 // ************************************************************************
-// 
+//
 //                        Kokkos v. 2.0
 //              Copyright (2014) Sandia Corporation
-// 
+//
 // Under the terms of Contract DE-AC04-94AL85000 with Sandia Corporation,
 // the U.S. Government retains certain rights in this software.
-// 
+//
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -36,7 +36,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // Questions? Contact  H. Carter Edwards (hcedwar@sandia.gov)
-// 
+//
 // ************************************************************************
 //@HEADER
 */
@@ -53,12 +53,8 @@
  */
   namespace Kokkos {
 
-template <typename Scalar, class Space = Kokkos::DefaultExecutionSpace >
-class vector : public DualView<Scalar*,LayoutLeft,Space> {
-public:
-  typedef typename Space::memory_space memory_space;
-  typedef typename Space::execution_space execution_space;
-  typedef typename Kokkos::Device<execution_space,memory_space> device_type;
+template< class Scalar, class Arg1Type = void>
+class vector : public DualView<Scalar*,LayoutLeft,Arg1Type> {
 
   typedef Scalar value_type;
   typedef Scalar* pointer;
@@ -72,11 +68,11 @@ private:
   size_t _size;
   typedef size_t size_type;
   float _extra_storage;
-  typedef DualView<Scalar*,LayoutLeft,Space> DV;
+  typedef DualView<Scalar*,LayoutLeft,Arg1Type> DV;
 
 
 public:
-#ifdef KOKKOS_CUDA_USE_UVM
+#ifdef KOKKOS_ENABLE_CUDA_UVM
   KOKKOS_INLINE_FUNCTION Scalar& operator() (int i) const {return DV::h_view(i);};
   KOKKOS_INLINE_FUNCTION Scalar& operator[] (int i) const {return DV::h_view(i);};
 #else
@@ -93,7 +89,7 @@ public:
   };
 
 
-  vector(int n, Scalar val=Scalar()):DualView<Scalar*,LayoutLeft,Space>("Vector",size_t(n*(1.1))) {
+  vector(int n, Scalar val=Scalar()):DualView<Scalar*,LayoutLeft,Arg1Type>("Vector",size_t(n*(1.1))) {
     _size = n;
     _extra_storage = 1.1;
     DV::modified_host() = 1;
@@ -285,3 +281,4 @@ public:
 
 }
 #endif
+

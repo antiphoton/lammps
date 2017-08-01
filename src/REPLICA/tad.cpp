@@ -43,8 +43,6 @@
 #include "fix_store.h"
 #include "force.h"
 #include "pair.h"
-#include "random_park.h"
-#include "random_mars.h"
 #include "output.h"
 #include "dump.h"
 #include "finish.h"
@@ -154,13 +152,14 @@ void TAD::command(int narg, char **arg)
 
   // create FixStore object to store revert state
 
-  narg2 = 5;
+  narg2 = 6;
   args = new char*[narg2];
   args[0] = (char *) "tad_revert";
   args[1] = (char *) "all";
   args[2] = (char *) "STORE";
-  args[3] = (char *) "0";
-  args[4] = (char *) "7";
+  args[3] = (char *) "peratom";
+  args[4] = (char *) "0";
+  args[5] = (char *) "7";
   modify->add_fix(narg2,args);
   fix_revert = (FixStore *) modify->fix[modify->nfix-1];
   delete [] args;
@@ -248,7 +247,7 @@ void TAD::command(int narg, char **arg)
   // need this line if quench() does only setup_minimal()
   // update->minimize->setup();
 
-  // This should work with if uncommented, but does not
+  // this should work with if statement uncommented, but does not
   // if (universe->iworld == 0) {
 
   fix_event->store_state_quench();
@@ -398,12 +397,14 @@ void TAD::command(int narg, char **arg)
       fprintf(universe->uscreen,
               "Loop time of %g on %d procs for %d steps with " BIGINT_FORMAT
               " atoms\n",
-              timer->get_wall(Timer::TOTAL),nprocs_universe,nsteps,atom->natoms);
+              timer->get_wall(Timer::TOTAL),nprocs_universe,
+              nsteps,atom->natoms);
     if (universe->ulogfile)
       fprintf(universe->ulogfile,
               "Loop time of %g on %d procs for %d steps with " BIGINT_FORMAT
               " atoms\n",
-              timer->get_wall(Timer::TOTAL),nprocs_universe,nsteps,atom->natoms);
+              timer->get_wall(Timer::TOTAL),nprocs_universe,
+              nsteps,atom->natoms);
   }
 
   if ((me_universe == 0) && ulogfile_neb) fclose(ulogfile_neb);
@@ -873,7 +874,7 @@ void TAD::revert_state()
 }
 
 /* ----------------------------------------------------------------------
-   Initialize list of possible events
+   initialize list of possible events
 ------------------------------------------------------------------------- */
 
 void TAD::initialize_event_list() {
@@ -889,7 +890,7 @@ void TAD::initialize_event_list() {
 }
 
 /* ----------------------------------------------------------------------
-   Delete list of possible events
+   delete list of possible events
 ------------------------------------------------------------------------- */
 
 void TAD::delete_event_list() {

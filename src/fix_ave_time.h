@@ -69,8 +69,7 @@ class FixAveTime : public Fix {
   int column_length(int);
   void invoke_scalar(bigint);
   void invoke_vector(bigint);
-  void options(int, char **);
-  void allocate_values(int);
+  void options(int, int, char **);
   void allocate_arrays();
   bigint nextvalid();
 };
@@ -88,6 +87,10 @@ Self-explanatory.  Check the input script syntax and compare to the
 documentation for the command.  You can use -echo screen as a
 command-line option when running LAMMPS to see the offending line.
 
+E: No values in fix ave/time command
+
+Self-explanatory.
+
 E: Compute ID for fix ave/time does not exist
 
 Self-explanatory.
@@ -98,15 +101,15 @@ Self-explanatory.
 
 E: Invalid fix ave/time off column
 
-Self-explantory.
+Self-explanatory.
 
 E: Fix ave/time compute does not calculate a scalar
 
-Self-explantory.
+Self-explanatory.
 
 E: Fix ave/time compute does not calculate a vector
 
-Self-explantory.
+Self-explanatory.
 
 E: Fix ave/time compute vector is accessed out-of-range
 
@@ -165,6 +168,10 @@ E: Fix ave/time cannot use variable with vector mode
 
 Variables produce scalar values.
 
+E: Error writing file header
+
+Something in the output to the file triggered an error.
+
 E: Fix ave/time cannot set output array intensive/extensive from these inputs
 
 One of more of the vector inputs has individual elements which are
@@ -175,6 +182,10 @@ E: Invalid timestep reset for fix ave/time
 
 Resetting the timestep has invalidated the sequence of timesteps this
 fix needs to process.
+
+E: Error writing out time averaged data
+
+Something in the output to the file triggered an error.
 
 E: Fix ave/time columns are inconsistent lengths
 

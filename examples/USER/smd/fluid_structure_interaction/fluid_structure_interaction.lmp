@@ -76,10 +76,10 @@ group           tlsph type 2
 variable        h equal 2.5*${l0} # SPH kernel diameter
 variable        vol_one equal ${l0}^2 # initial particle volume for 2d simulation
 set             group all diameter ${h}
-set             group all smd_contact_radius ${l0}
+set             group all smd/contact/radius ${l0}
 set             group all volume  ${vol_one}
-set             group all smd_mass_density ${rho_water}
-set             group solids smd_mass_density ${rho_obj}
+set             group all smd/mass/density ${rho_water}
+set             group solids smd/mass/density ${rho_obj}
 variable        contact_scale equal 1.5 # scale factor to increase contact gap between bodies
 variable        skin equal ${h} # Verlet list range
 neighbor        ${skin} bin
@@ -124,11 +124,11 @@ fix             integration_fix_solids solids smd/integrate_tlsph
 ####################################################################################################
 # SPECIFY TRAJECTORY OUTPUT
 ####################################################################################################
-compute         eint all smd/internal_energy
-compute         contact_radius all smd/contact_radius
-compute         S solids smd/tlsph_stress
-compute         nn water smd/ulsph_num_neighs
-compute         epl solids smd/plastic_strain
+compute         eint all smd/internal/energy
+compute         contact_radius all smd/contact/radius
+compute         S solids smd/tlsph/stress
+compute         nn water smd/ulsph/num/neighs
+compute         epl solids smd/plastic/strain
 compute         vol all smd/volume
 compute         rho all smd/rho
 

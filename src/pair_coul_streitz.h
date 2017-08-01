@@ -1,4 +1,4 @@
-/* ----------------------------------------------------------------------
+/* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    http://lammps.sandia.gov, Sandia National Laboratories
    Steve Plimpton, sjplimp@sandia.gov
@@ -69,7 +69,7 @@ class PairCoulStreitz : public Pair {
 
   void allocate();
   virtual void read_file(char *);
-  void setup();
+  void setup_params();
   double self(Param *, double);
   void coulomb_integral_wolf(double, double, double, double &, double &,
         double &, double &);
