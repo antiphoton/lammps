@@ -113,7 +113,7 @@ void ComputeBiggest::compute_vector()
   MPI_Allreduce(&maxTagLocal,&maxTag,1,MPI_INT,MPI_MAX,world);
   int *countLocal,*countGlobal;
   memory->create(countLocal,1+maxTag,"biggest:countLocal");
-  memory->create(countGlobal,1+maxTag,"biggest:countLocal");
+  memory->create(countGlobal,1+maxTag,"biggest:countGlobal");
   for (int i=0;i<=maxTag;i++) {
       countLocal[i]=0;
   }
