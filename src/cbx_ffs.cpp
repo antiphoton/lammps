@@ -13,6 +13,7 @@
 #include"update.h"
 #include"cbx_ffs.h"
 using namespace LAMMPS_NS;
+#define DEBUG printf("------ rank %d (%d of universe %d) ------ line %d ------\n", world->rank, local->rank, local->id, __LINE__);
 struct MpiInfo {
     const int LEADER;
     const int id;
@@ -496,16 +497,17 @@ public:
             total+=b[i];
         }
         int allSize=lambdaGlobal.size();
-        int *p=new int[allSize];
-        for (int i=0;i<allSize;i++) {
-            p[i]=lambdaGlobal[i];
-        }
         MPI_Bcast(&allSize,1,MPI_INT,0,commLocal);
-        MPI_Bcast(p,allSize,MPI_INT,0,commLocal);
-        if (local->rank!=0) {
+        int *p=new int[allSize];
+        if (local->isLeader) {
             for (int i=0;i<allSize;i++) {
-                lambdaGlobal.push_back(p[i]);
+                p[i]=lambdaGlobal[i];
             }
+        }
+        MPI_Bcast(p,allSize,MPI_INT,0,commLocal);
+        lambdaGlobal.clear();
+        for (int i=0;i<allSize;i++) {
+            lambdaGlobal.push_back(p[i]);
         }
         delete[] p;
     }
@@ -552,10 +554,16 @@ public:
     ~FfsShootingStats() {
     }
     void addSuccess(int x) {
+        if (!local->isLeader) {
+            return ;
+        }
         x%=n;
         p[x*2]++;
     }
     void addFailure(int x) {
+        if (!local->isLeader) {
+            return ;
+        }
         x%=n;
         p[x*2+1]++;
     }
@@ -729,6 +737,9 @@ int ffs_main(int argc, char **argv) {
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda=(int)lambdaReuslt[0];
                 static int lambda_0=lambdaList[1];
+                if (local->isLeader) {
+                  printf("In universe#%d  lambda = %d goal = %d\n", local->id, lambda, lambda_0);
+                }
                 if (lambda<=lambda_A) {
                     ready=true;
                 }
@@ -779,6 +790,9 @@ int ffs_main(int argc, char **argv) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda_calc=(int)lambdaReuslt[0];
+                if (local->isLeader) {
+                    printf("In universe#%d  lambda = %d goal = %d\n", local->id, lambda_calc, lambda_next);
+                }
                 fss.flush();
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
