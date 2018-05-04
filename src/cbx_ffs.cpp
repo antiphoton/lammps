@@ -719,13 +719,15 @@ int ffs_main(int argc, char **argv) {
     FfsTrajectoryReader continuedTrajectory;
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
+    int print_every = ffsParams->getInt("print_every");
+    const int config_each_lambda = ffsParams->getInt("config_each_lambda");
     const std::vector<int> lambdaList=ffsParams->getVector("lambda");
     static int lambda_A=lambdaList[0];
     FfsRandomGenerator rng;
     FfsFileTree *lastTree,*currentTree;
     if (1) {
         int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
-        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(0));
+        FfsCountdown *fcd = new FfsCountdown(config_each_lambda - continuedTrajectory.countPrecalculated(0));
         lammps_command(lammps,(char *)"run 0 pre yes post no");
         lastTree=0;
         currentTree=new FfsFileTree(&continuedTrajectory,0);
@@ -738,7 +740,9 @@ int ffs_main(int argc, char **argv) {
                 lambda=(int)lambdaReuslt[0];
                 static int lambda_0=lambdaList[1];
                 if (local->isLeader) {
-                  printf("In universe#%d  lambda = %d goal = %d\n", local->id, lambda, lambda_0);
+                  if (std::rand() < 1.0 * RAND_MAX / print_every) {
+                    printf("%d : %d ... %d\n", local->id, lambda, lambda_0);
+                  }
                 }
                 if (lambda<=lambda_A) {
                     ready=true;
@@ -774,7 +778,7 @@ int ffs_main(int argc, char **argv) {
         currentTree=new FfsFileTree(&continuedTrajectory,i);
         lastTree->commit();
         fss.initStat(lastTree);
-        FfsCountdown *fcd=new FfsCountdown(ffsParams->getInt("config_each_lambda")-continuedTrajectory.countPrecalculated(i));
+        FfsCountdown *fcd = new FfsCountdown(config_each_lambda - continuedTrajectory.countPrecalculated(i));
         const int lambda_next=lambdaList[i+1];
         while (1) {
             static char strReadData[100];
@@ -791,7 +795,9 @@ int ffs_main(int argc, char **argv) {
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda_calc=(int)lambdaReuslt[0];
                 if (local->isLeader) {
-                    printf("In universe#%d  lambda = %d goal = %d\n", local->id, lambda_calc, lambda_next);
+                  if (std::rand() < 1.0 * RAND_MAX / print_every) {
+                    printf("%d : %d ... %d\n", local->id, lambda_calc, lambda_next);
+                  }
                 }
                 fss.flush();
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {

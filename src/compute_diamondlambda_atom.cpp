@@ -230,7 +230,7 @@ void ComputeDiamondLambdaAtom::unpack_forward_comm(int n, int first, double *buf
         }
         if (packNuclei) {
             const int newNucleiId = buf[m++];
-            nucleiID[i] = newNucleiId;
+            nucleiID[i] = MIN(nucleiID[i], newNucleiId);
         }
     }
 }
