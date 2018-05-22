@@ -226,11 +226,19 @@ void ComputeDiamondLambdaAtom::unpack_forward_comm(int n, int first, double *buf
             }
         }
         if (packSolid) {
-            isSolid[i] = buf[m++];
+            const bool newIsSolid = buf[m++];
+            isSolid[i] = isSolid[i] || newIsSolid;
         }
         if (packNuclei) {
-            const int newNucleiId = buf[m++];
-            nucleiID[i] = MIN(nucleiID[i], newNucleiId);
+            const double oldNucleiId = nucleiID[i];
+            const double newNucleiId = buf[m++];
+            if (oldNucleiId == 0) {
+              nucleiID[i] = newNucleiId;
+            } else if (newNucleiId == 0) {
+              nucleiID[i] = oldNucleiId;
+            } else {
+              nucleiID[i] = MIN(nucleiID[i], newNucleiId);
+            }
         }
     }
 }
