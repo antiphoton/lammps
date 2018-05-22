@@ -696,7 +696,7 @@ class FfsRandomGenerator: public FfsBranch {
 int createVelocity(LAMMPS *lammps,int temp,FfsRandomGenerator *pRng) {
     static char str[100];
     int seed=pRng->get();
-    sprintf(str,"velocity all create %d %d",temp,seed);
+    sprintf(str,"velocity all create %d %d dist gaussian",temp,seed);
     lammps_command(lammps,str);
     return seed;
 };
@@ -741,7 +741,7 @@ int ffs_main(int argc, char **argv) {
                 static int lambda_0=lambdaList[1];
                 if (local->isLeader) {
                   if (std::rand() < 1.0 * RAND_MAX / print_every) {
-                    printf("%d : %d ... %d\n", local->id, lambda, lambda_0);
+                    printf("[%d] %d : %d ... %d\n", std::time(0), local->id, lambda, lambda_0);
                   }
                 }
                 if (lambda<=lambda_A) {
@@ -796,7 +796,7 @@ int ffs_main(int argc, char **argv) {
                 lambda_calc=(int)lambdaReuslt[0];
                 if (local->isLeader) {
                   if (std::rand() < 1.0 * RAND_MAX / print_every) {
-                    printf("%d : %d ... %d\n", local->id, lambda_calc, lambda_next);
+                    printf("[%d] %d : %d ... %d\n", std::time(0), local->id, lambda_calc, lambda_next);
                   }
                 }
                 fss.flush();
