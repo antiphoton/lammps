@@ -712,6 +712,24 @@ void runBatch(LAMMPS *lammps) {
         lammps_command(lammps,str);
     }
 }
+
+void printBox(void *lmp, const std::string &xyzFinal) {
+  if (local->isLeader) {
+    static double low[3], high[3], xy, yz, xz;
+    static int periodicity[3], boxChange;
+    lammps_extract_box(lmp, low, high, &xy, &yz, &xz, periodicity, &boxChange);
+    printf("%s (%f, %f, %f) - (%f, %f, %f)\n", xyzFinal.c_str(), low[0], low[1], low[2], high[0], high[1], high[2]);
+  }
+}
+
+void printStatus(const int print_every, const int timestep, const int current, const int target) {
+  if (local->isLeader) {
+    if (std::rand() < 1.0 * RAND_MAX / print_every) {
+      printf("[date=%d] [universe=%d] [steps=%d] : %d ... %d\n", std::time(0), local->id, timestep, current, target);
+    }
+  }
+}
+
 int ffs_main(int argc, char **argv) {
     runBatch(0);
     LAMMPS *lammps=new LAMMPS(argc,argv,local->comm);
@@ -719,6 +737,7 @@ int ffs_main(int argc, char **argv) {
     FfsTrajectoryReader continuedTrajectory;
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
+    int equilibriumSteps=ffsParams->getInt("equilibrium");
     int print_every = ffsParams->getInt("print_every");
     const int config_each_lambda = ffsParams->getInt("config_each_lambda");
     const std::vector<int> lambdaList=ffsParams->getVector("lambda");
@@ -739,10 +758,10 @@ int ffs_main(int argc, char **argv) {
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda=(int)lambdaReuslt[0];
                 static int lambda_0=lambdaList[1];
-                if (local->isLeader) {
-                  if (std::rand() < 1.0 * RAND_MAX / print_every) {
-                    printf("[%d] %d : %d ... %d\n", std::time(0), local->id, lambda, lambda_0);
-                  }
+                const int64_t timestep = lammps->update->ntimestep;
+                printStatus(print_every, timestep, lambda, lambda_0);
+                if (timestep <= equilibriumSteps) {
+                  continue;
                 }
                 if (lambda<=lambda_A) {
                     ready=true;
@@ -766,6 +785,7 @@ int ffs_main(int argc, char **argv) {
             sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
             fileTrajectory.writeln((const char *)0,0,velocitySeed,timestep,xyzFinal.c_str(),lambda);
             lammps_command(lammps,strDump);
+            printBox(lammps, xyzFinal);
             fcd->done();
         }
         lammps_command(lammps,(char *)"run 0 pre no post yes");
@@ -794,11 +814,8 @@ int ffs_main(int argc, char **argv) {
                 runBatch(lammps);
                 const double *lambdaReuslt=(const double *)lammps_extract_compute(lammps,(char *)"lambda",0,1);
                 lambda_calc=(int)lambdaReuslt[0];
-                if (local->isLeader) {
-                  if (std::rand() < 1.0 * RAND_MAX / print_every) {
-                    printf("[%d] %d : %d ... %d\n", std::time(0), local->id, lambda_calc, lambda_next);
-                  }
-                }
+                const int64_t timestep = lammps->update->ntimestep;
+                printStatus(print_every, timestep, lambda_calc, lambda_next);
                 fss.flush();
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
@@ -825,6 +842,7 @@ int ffs_main(int argc, char **argv) {
                 sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
                 fileTrajectory.writeln(xyzInit.c_str(),lambdaInit,velocitySeed,timestep,xyzFinal.c_str(),lambda_calc);
                 lammps_command(lammps,strDump);
+                printBox(lammps, xyzFinal);
                 fcd->done();
                 continue;
             }
