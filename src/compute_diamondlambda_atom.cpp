@@ -32,7 +32,6 @@
 #include "error.h"
 #include "math_const.h"
 
-
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
@@ -279,6 +278,7 @@ void ComputeDiamondLambdaAtom::compute_peratom()
   ilist = list->ilist;
   numneigh = list->numneigh;
   firstneigh = list->firstneigh;
+  tagint *tag = atom->tag;
 
   memory->destroy(hydrogenBondNeigh);
   memory->create(hydrogenBondNeigh,inum,nnn,"diamondlambda/atom:hydrogenBondNeigh");
@@ -444,16 +444,18 @@ void ComputeDiamondLambdaAtom::compute_peratom()
   if (!computeNucleiId) {
       return ;
   }
-  tagint *tag = atom->tag;
+  for (int i = atom->nmax - 1; i >= 0; i -= 1) {
+    isSolid[i] = 0;
+    nucleiID[i] = 0;
+  }
   for (ii = 0; ii < inum; ii++) {
     i = ilist[ii];
-    if (mask[i] & groupbit) {
+    if ((mask[i] & groupbit)) {
+      if (checkSolid(ii)) {
+        isSolid[i] = 1;
         nucleiID[i] = tag[i];
+      }
     }
-    else {
-        nucleiID[i] = 0;
-    }
-    isSolid[i]=checkSolid(ii)?1:0;
   }
   packQlm=false;
   packSolid=true;
@@ -531,7 +533,9 @@ void ComputeDiamondLambdaAtom::compute_peratom()
               if (j==-1) {
                   break;
               }
-              if (nucleiID[i] == nucleiID[j]) continue;
+              if (nucleiID[i] == nucleiID[j]) {
+                continue;
+              }
               if (!isSolid[j]) {
                   continue;
               }
