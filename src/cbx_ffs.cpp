@@ -94,76 +94,47 @@ struct FfsFileReader: public FfsBranch {
     };
     int getInt(const std::string &name) const {
         int y=0;
-        if (world->isLeader) {
-            const std::string v=getString(name);
-            sscanf(v.c_str(),"%d",&y);
-        }
-        if (local->isLeader) {
-            MPI_Bcast(&y,1,MPI_INT,0,commLeader);
-        }
-        MPI_Bcast(&y,1,MPI_INT,0,commLocal);
+        const std::string v=getString(name);
+        sscanf(v.c_str(),"%d",&y);
         return y;
     }
     std::vector<int> getVector(const std::string &name) const {
         std::vector<int> v;
-        if (world->isLeader) {
-            const std::string s=getString(name);
-            const char *p=s.c_str();
-            int x;
-            int n;
-            while (sscanf(p,"%d%n",&x,&n)>0) {
-                v.push_back(x);
-                p+=n;
-            }
-        }
+        const std::string s = getString(name);
+        const char *p = s.c_str();
+        int x;
         int n;
-        int *p;
-        if (world->isLeader) {
-            n=v.size();
-            p=new int[n];
-            for (int i=0;i<n;i++) {
-                p[i]=v[i];
-            }
-            for (int i=1;i<size;i++) {
-                MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLeader);
-            }
+        while (sscanf(p, "%d%n", &x, &n) > 0) {
+            v.push_back(x);
+            p += n;
         }
-        else if (local->isLeader) {
-            MPI_Status status;
-            MPI_Probe(0,TAG_FILE_VECTOR,commLeader,&status);
-            MPI_Get_count(&status,MPI_INT,&n);
-            p=new int[n];
-            MPI_Recv(p,n,MPI_INT,0,TAG_FILE_VECTOR,commLeader,&status);
-        }
-        if (local->isLeader) {
-            for (int i=1;i<local->size;i++) {
-                MPI_Send(p,n,MPI_INT,i,TAG_FILE_VECTOR,commLocal);
-            }
-        }
-        else {
-            MPI_Status status;
-            MPI_Probe(0,TAG_FILE_VECTOR,commLocal,&status);
-            MPI_Get_count(&status,MPI_INT,&n);
-            p=new int[n];
-            MPI_Recv(p,n,MPI_INT,0,TAG_FILE_VECTOR,commLocal,&status);
-        }
-        if (!world->isLeader) {
-            for (int i=0;i<n;i++) {
-                v.push_back(p[i]);
-            }
-        }
-        delete[] p;
         return v;
     }
-private:
     const std::string getString(const std::string &name) const {
-        std::map<std::string,std::string>::const_iterator i=dict.find(name);
-        if (i==dict.end()) {
-            return "";
+        char *p;
+        int l;
+        if (world->isLeader) {
+            std::map<std::string,std::string>::const_iterator i=dict.find(name);
+            if (i==dict.end()) {
+                p = 0;
+                l = 0;
+            }
+            else {
+                const std::string s = i->second;
+                l = s.length();
+                p = new char[l + 1];
+                s.copy(p, l);
+            }
         }
-        else {
-            return i->second;
+        MPI_Bcast(&l, 1, MPI_INT, 0, world->comm);
+        if (!world -> isLeader) {
+            p = new char[l + 1];
         }
+        MPI_Bcast(p, l + 1, MPI_CHAR, 0, world->comm);
+        p[l] = 0;
+        const std::string result = std::string(p);
+        delete[] p;
+        return result;
     }
 };
 const FfsFileReader *ffsParams;
@@ -693,10 +664,10 @@ class FfsRandomGenerator: public FfsBranch {
         }
 };
 
-int createVelocity(LAMMPS *lammps,int temp,FfsRandomGenerator *pRng) {
+int createVelocity(LAMMPS *lammps, const std::string &groupName, int temp, FfsRandomGenerator *pRng) {
     static char str[100];
     int seed=pRng->get();
-    sprintf(str,"velocity all create %d %d dist gaussian",temp,seed);
+    sprintf(str,"velocity %s create %d %d dist gaussian", groupName.c_str(), temp, seed);
     lammps_command(lammps,str);
     return seed;
 };
@@ -737,6 +708,7 @@ int ffs_main(int argc, char **argv) {
     FfsTrajectoryReader continuedTrajectory;
     FfsTrajectoryWriter fileTrajectory;
     int temperatureMean=ffsParams->getInt("temperature");
+    const std::string waterGroupName = ffsParams->getString("water_group");
     int equilibriumSteps=ffsParams->getInt("equilibrium");
     int print_every = ffsParams->getInt("print_every");
     const int config_each_lambda = ffsParams->getInt("config_each_lambda");
@@ -745,7 +717,7 @@ int ffs_main(int argc, char **argv) {
     FfsRandomGenerator rng;
     FfsFileTree *lastTree,*currentTree;
     if (1) {
-        int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
+        int velocitySeed=createVelocity(lammps, waterGroupName, temperatureMean, &rng);
         FfsCountdown *fcd = new FfsCountdown(config_each_lambda - continuedTrajectory.countPrecalculated(0));
         lammps_command(lammps,(char *)"run 0 pre yes post no");
         lastTree=0;
@@ -807,7 +779,7 @@ int ffs_main(int argc, char **argv) {
             const int lambdaInit=lastTree->getLambda(initConfig);
             sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",xyzInit.c_str());
             lammps_command(lammps,strReadData);
-            int velocitySeed=createVelocity(lammps,temperatureMean,&rng);
+            int velocitySeed=createVelocity(lammps, waterGroupName, temperatureMean, &rng);
             lammps_command(lammps,(char *)"run 0 pre yes post no");
             int lambda_calc;
             while (1) {
