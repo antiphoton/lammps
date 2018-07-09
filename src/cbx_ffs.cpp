@@ -732,9 +732,6 @@ int ffs_main(int argc, char **argv) {
                 static int lambda_0=lambdaList[1];
                 const int64_t timestep = lammps->update->ntimestep;
                 printStatus(print_every, timestep, lambda, lambda_0);
-                if (timestep <= equilibriumSteps) {
-                  continue;
-                }
                 if (lambda<=lambda_A) {
                     ready=true;
                 }
@@ -752,6 +749,9 @@ int ffs_main(int argc, char **argv) {
                 break;
             }
             int64_t timestep=lammps->update->ntimestep;
+            if (timestep <= equilibriumSteps) {
+              continue;
+            }
             static char strDump[100];
             const std::string xyzFinal=currentTree->add(lambda);
             sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
