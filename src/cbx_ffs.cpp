@@ -30,19 +30,19 @@ const MpiInfo *world,*local;
 class FfsBranch {
 public:
     FfsBranch() {
-        if (!commInited) {
-            size=world->size/local->size;
-            initComm();
-            commInited=true;
-        }
+      if (!FfsBranch::commInited) {
+        size = world->size / local->size;
+        FfsBranch::initComm();
+        FfsBranch::commInited=true;
+      }
     }
     ~FfsBranch() {
     }
 private:
     static bool commInited;
     static void initComm() {
-        MPI_Comm_dup(local->comm,&commLocal);
-        MPI_Comm_split(world->comm,local->isLeader?0:MPI_UNDEFINED,world->rank,&commLeader);
+        MPI_Comm_dup(local->comm, &FfsBranch::commLocal);
+        MPI_Comm_split(world->comm, local->isLeader ? 0 : MPI_UNDEFINED, world->rank, &FfsBranch::commLeader);
     };
 protected:
     static int size;
@@ -171,11 +171,11 @@ protected:
         while (1) {
             int flag;
             MPI_Status status;
-            MPI_Iprobe(MPI_ANY_SOURCE,TAG_FILEWRITER_LINE,commLeader,&flag,&status);
+            MPI_Iprobe(MPI_ANY_SOURCE, FfsBranch::TAG_FILEWRITER_LINE, FfsBranch::commLeader, &flag, &status);
             if (flag) {
                 int l;
                 MPI_Get_count(&status,MPI_CHAR,&l);
-                MPI_Recv(buffer,l,MPI_CHAR,status.MPI_SOURCE,status.MPI_TAG,commLeader,&status);
+                MPI_Recv(buffer, l, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
                 putstr0(status.MPI_SOURCE,buffer);
             }
             else {
@@ -195,7 +195,7 @@ private:
         }
         else {
             int l=strlen(s);
-            MPI_Send(s,l+1,MPI_CHAR,0,TAG_FILEWRITER_LINE,commLeader);
+            MPI_Send(s, l + 1, MPI_CHAR, 0, FfsBranch::TAG_FILEWRITER_LINE, FfsBranch::commLeader);
         }
     }
     int nFlush;
@@ -254,7 +254,7 @@ public:
         int *p;
         if (world->isLeader) {
             std::vector< std::vector<int> > v;
-            v.resize(size);
+            v.resize(FfsBranch::size);
             FILE *f=fopen("trajectory.in.txt","r");
             while (1) {
                 int lambda,layer,branch,count;
@@ -281,16 +281,16 @@ public:
                 for (j=0;j<nn;j++) {
                     pp[j]=vv[j];
                 }
-                MPI_Send(pp,nn,MPI_INT,i,TAG_FILEREADER,commLeader);
+                MPI_Send(pp, nn, MPI_INT, i, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader);
                 delete[] pp;
             }
         }
         else if (local->isLeader) {
             MPI_Status status;
-            MPI_Probe(0,TAG_FILEREADER,commLeader,&status);
+            MPI_Probe(0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
             MPI_Get_count(&status,MPI_INT,&n);
             p=new int[n];
-            MPI_Recv(p,n,MPI_INT,0,TAG_FILEREADER,commLeader,&status);
+            MPI_Recv(p, n, MPI_INT, 0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
         }
         if (local->isLeader) {
             int i;
@@ -309,7 +309,7 @@ public:
             }
             delete[] p;
         }
-        MPI_Barrier(commLocal);
+        MPI_Barrier(FfsBranch::commLocal);
     }
     const std::vector<int> &get(int layer) const {
         if (layer<lambdaLocal.size()) {
@@ -323,9 +323,9 @@ public:
         int x;
         if (local->isLeader) {
             int t=get(layer).size();
-            MPI_Allreduce(&t,&x,1,MPI_INT,MPI_SUM,commLeader);
+            MPI_Allreduce(&t, &x, 1, MPI_INT, MPI_SUM, FfsBranch::commLeader);
         }
-        MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+        MPI_Bcast(&x, 1, MPI_INT, 0, FfsBranch::commLocal);
         return x;
     }
 private:
@@ -352,7 +352,7 @@ public:
             remains-=x;
         }
         else {
-            MPI_Send(&x,1,MPI_INT,0,TAG_COUNTDOWN_DONE,commLeader);
+            MPI_Send(&x, 1, MPI_INT, 0, FfsBranch::TAG_COUNTDOWN_DONE, FfsBranch::commLeader);
         }
     }
     bool next() {
@@ -365,10 +365,10 @@ public:
                 while (1) {
                     int flag;
                     MPI_Status status;
-                    MPI_Iprobe(MPI_ANY_SOURCE,TAG_COUNTDOWN_DONE,commLeader,&flag,&status);
+                    MPI_Iprobe(MPI_ANY_SOURCE, FfsBranch::TAG_COUNTDOWN_DONE, FfsBranch::commLeader, &flag, &status);
                     if (flag) {
                         int x;
-                        MPI_Recv(&x,1,MPI_INT,status.MPI_SOURCE,status.MPI_TAG,commLeader,&status);
+                        MPI_Recv(&x, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
                         remains-=x;
                     }
                     else {
@@ -378,8 +378,8 @@ public:
                 if (remains<=0) {
                     terminated=true;
                     int i;
-                    for (i=1;i<size;i++) {
-                        MPI_Send(0,0,MPI_INT,i,TAG_COUNTDOWN_TERMINATE,commLeader);
+                    for (i = 1; i < FfsBranch::size; i += 1) {
+                        MPI_Send(0, 0, MPI_INT, i, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader);
                     }
                     ret=0;
                 }
@@ -390,10 +390,10 @@ public:
             else {
                 int flag;
                 MPI_Status status;
-                MPI_Iprobe(0,TAG_COUNTDOWN_TERMINATE,commLeader,&flag,&status);
+                MPI_Iprobe(0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &flag, &status);
                 if (flag) {
                     terminated=true;
-                    MPI_Recv(0,0,MPI_INT,0,TAG_COUNTDOWN_TERMINATE,commLeader,&status);
+                    MPI_Recv(0, 0, MPI_INT, 0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &status);
                     ret=0;
                 }
                 else {
@@ -401,7 +401,7 @@ public:
                 }
             }
         }
-        MPI_Bcast(&ret,1,MPI_INT,0,commLocal);
+        MPI_Bcast(&ret, 1, MPI_INT, 0, FfsBranch::commLocal);
         if (ret==0) {
             terminated=true;
         }
@@ -414,10 +414,10 @@ private:
 class FfsFileTree: public FfsBranch {
 public:
     FfsFileTree(const FfsTrajectoryReader *ftr,int layer):layer(layer) {
-        a=new int[size];
-        b=new int[size];
+        a = new int[FfsBranch::size];
+        b = new int[FfsBranch::size];
         int i;
-        for (i=0;i<size;i++) {
+        for (i = 0; i < FfsBranch::size; i += 1) {
             a[i]=0;
             b[i]=0;
         }
@@ -437,45 +437,45 @@ public:
             a[local->id]++;
             lambdaLocal.push_back(lambda);
         }
-        MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+        MPI_Bcast(&x, 1, MPI_INT, 0, FfsBranch::commLocal);
         return generateName(x);
     }
     void commit() {
         if (local->isLeader) {
-            MPI_Allreduce(a,b,size,MPI_INT,MPI_SUM,commLeader);
+            MPI_Allreduce(a, b, FfsBranch::size, MPI_INT, MPI_SUM, FfsBranch::commLeader);
             int mySize=lambdaLocal.size();
             int currentSize;
             int maxSize;
-            MPI_Allreduce(&mySize,&maxSize,1,MPI_INT,MPI_MAX,commLeader);
+            MPI_Allreduce(&mySize, &maxSize, 1, MPI_INT, MPI_MAX, FfsBranch::commLeader);
             int *p=new int[maxSize];
             int i,j;
-            for (i=0;i<size;i++) {
+            for (i = 0; i < FfsBranch::size; i += 1) {
                 if (i==local->id) {
                     currentSize=mySize;
                     std::copy(lambdaLocal.begin(),lambdaLocal.end(),p);
                 }
-                MPI_Bcast(&currentSize,1,MPI_INT,i,commLeader);
-                MPI_Bcast(p,currentSize,MPI_INT,i,commLeader);
+                MPI_Bcast(&currentSize, 1, MPI_INT, i, FfsBranch::commLeader);
+                MPI_Bcast(p, currentSize, MPI_INT, i, FfsBranch::commLeader);
                 for (j=0;j<currentSize;j++) {
                     lambdaGlobal.push_back(p[j]);
                 }
             }
             delete[] p;
         }
-        MPI_Bcast(b,size,MPI_INT,0,commLocal);
+        MPI_Bcast(b, FfsBranch::size, MPI_INT, 0, FfsBranch::commLocal);
         total=0;
-        for (int i=0;i<size;i++) {
+        for (int i = 0; i < FfsBranch::size; i += 1) {
             total+=b[i];
         }
         int allSize=lambdaGlobal.size();
-        MPI_Bcast(&allSize,1,MPI_INT,0,commLocal);
+        MPI_Bcast(&allSize, 1, MPI_INT, 0, FfsBranch::commLocal);
         int *p=new int[allSize];
         if (local->isLeader) {
             for (int i=0;i<allSize;i++) {
                 p[i]=lambdaGlobal[i];
             }
         }
-        MPI_Bcast(p,allSize,MPI_INT,0,commLocal);
+        MPI_Bcast(p, allSize, MPI_INT, 0, FfsBranch::commLocal);
         lambdaGlobal.clear();
         for (int i=0;i<allSize;i++) {
             lambdaGlobal.push_back(p[i]);
@@ -485,7 +485,7 @@ public:
     const std::string getName(int x) const {
         x%=total;
         int i;
-        for (i=0;i<size;i++) {
+        for (i = 0; i < FfsBranch::size; i += 1) {
             if (x<b[i]) {
                 return generateName(x,i);
             }
@@ -548,10 +548,10 @@ public:
                 currentFlushIndicator=0;
                 int *y=new int[n*2];
                 int i;
-                for (i=1;i<size;i++) {
-                    MPI_Send(0,0,MPI_INT,i,TAG_STATS_FLUSH,commLeader);
+                for (i = 1; i < FfsBranch::size; i += 1) {
+                    MPI_Send(0, 0, MPI_INT, i, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader);
                 }
-                MPI_Reduce(p,y,n*2,MPI_INT,MPI_SUM,0,commLeader);
+                MPI_Reduce(p, y, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
                 FILE *f=fopen(fileName[currentPointer],"w");
                 currentPointer=(currentPointer+1)%2;
                 for (i=0;i<n;i++) {
@@ -566,10 +566,10 @@ public:
         else {
             int flag;
             MPI_Status status;
-            MPI_Iprobe(0,TAG_STATS_FLUSH,commLeader,&flag,&status);
+            MPI_Iprobe(0, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader, &flag, &status);
             if (flag) {
-                MPI_Recv(0,0,MPI_INT,0,TAG_STATS_FLUSH,commLeader,&status);
-                MPI_Reduce(p,0,n*2,MPI_INT,MPI_SUM,0,commLeader);
+                MPI_Recv(0, 0, MPI_INT, 0, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader, &status);
+                MPI_Reduce(p, 0, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
             }
         }
     }
@@ -592,7 +592,7 @@ public:
         }
         if (n>0) {
             int *y=new int[n*2];
-            MPI_Reduce(p,y,n*2,MPI_INT,MPI_SUM,0,commLeader);
+            MPI_Reduce(p, y, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
             if (world->isLeader) {
                 int i;
                 for (i=0;i<n;i++) {
@@ -659,7 +659,7 @@ class FfsRandomGenerator: public FfsBranch {
             if (local->isLeader) {
                 x=std::rand();
             }
-            MPI_Bcast(&x,1,MPI_INT,0,commLocal);
+            MPI_Bcast(&x, 1, MPI_INT, 0, FfsBranch::commLocal);
             return x;
         }
 };
