@@ -116,8 +116,9 @@ struct FfsFileReader: public FfsBranch {
         if (world->isLeader) {
             std::map<std::string,std::string>::const_iterator i=dict.find(name);
             if (i==dict.end()) {
-                p = 0;
-                l = 0;
+              fprintf(stderr, "Missing parameter \"%s\" in ffs input\n", name.c_str());
+              p = NULL;
+              l = 0;
             }
             else {
                 const std::string s = i->second;
@@ -131,7 +132,7 @@ struct FfsFileReader: public FfsBranch {
             p = new char[l + 1];
         }
         MPI_Bcast(p, l + 1, MPI_CHAR, 0, world->comm);
-        p[l] = 0;
+        p[l] = '\0';
         const std::string result = std::string(p);
         delete[] p;
         return result;
