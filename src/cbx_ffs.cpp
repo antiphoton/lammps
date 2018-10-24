@@ -174,9 +174,9 @@ protected:
             if (flag) {
                 int l;
                 MPI_Get_count(&status,MPI_CHAR,&l);
-                printf("[date=%d] world leader will receive TAG_FILEWRITER_LINE\n", std::time(0));
+                printf("[date=%d] world leader will receive TAG_FILEWRITER_LINE from %d\n", std::time(0), status.MPI_SOURCE);
                 MPI_Recv(buffer, l, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
-                printf("[date=%d] world leader did receive TAG_FILEWRITER_LINE\n", std::time(0));
+                printf("[date=%d] world leader did receive TAG_FILEWRITER_LINE from %d\n", std::time(0), status.MPI_SOURCE);
                 putstr0(status.MPI_SOURCE,buffer);
             }
             else {
@@ -284,9 +284,9 @@ public:
                 for (j=0;j<nn;j++) {
                     pp[j]=vv[j];
                 }
-                printf("[date=%d] universe %d will send TAG_FILEREADER\n", std::time(0), local->id);
+                printf("[date=%d] world leader will send TAG_FILEREADER to %d\n", std::time(0), i);
                 MPI_Send(pp, nn, MPI_INT, i, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader);
-                printf("[date=%d] universe %d did send TAG_FILEREADER\n", std::time(0), local->id);
+                printf("[date=%d] world leader did send TAG_FILEREADER to %d\n", std::time(0), i);
                 delete[] pp;
             }
         }
@@ -295,9 +295,9 @@ public:
             MPI_Probe(0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
             MPI_Get_count(&status,MPI_INT,&n);
             p=new int[n];
-            printf("[date=%d] world leader will receive TAG_FILEREADER\n", std::time(0));
+            printf("[date=%d] universe %d will receive TAG_FILEREADER\n", std::time(0), local->id);
             MPI_Recv(p, n, MPI_INT, 0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
-            printf("[date=%d] world leader did receive TAG_FILEREADER\n", std::time(0));
+            printf("[date=%d] universe %d did receive TAG_FILEREADER\n", std::time(0), local->id);
         }
         if (local->isLeader) {
             int i;
@@ -377,9 +377,9 @@ public:
                     MPI_Iprobe(MPI_ANY_SOURCE, FfsBranch::TAG_COUNTDOWN_DONE, FfsBranch::commLeader, &flag, &status);
                     if (flag) {
                         int x;
-                        printf("[date=%d] world leader will receive TAG_COUNTDOWN_DONE\n", std::time(0));
+                        printf("[date=%d] world leader will receive TAG_COUNTDOWN_DONE from %d\n", std::time(0), status.MPI_SOURCE);
                         MPI_Recv(&x, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
-                        printf("[date=%d] world leader did receive TAG_COUNTDOWN_DONE\n", std::time(0));
+                        printf("[date=%d] world leader did receive TAG_COUNTDOWN_DONE from %d\n", std::time(0), status.MPI_SOURCE);
                         remains-=x;
                     }
                     else {
