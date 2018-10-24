@@ -390,9 +390,9 @@ public:
                     terminated=true;
                     int i;
                     for (i = 1; i < FfsBranch::size; i += 1) {
-                        printf("[date=%d] universe %d will send TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
+                        printf("[date=%d] world leader will send TAG_COUNTDOWN_TERMINATE to %d\n", std::time(0), i);
                         MPI_Send(0, 0, MPI_INT, i, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader);
-                        printf("[date=%d] universe %d did send TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
+                        printf("[date=%d] world leader did send TAG_COUNTDOWN_TERMINATE to %d\n", std::time(0), i);
                     }
                     ret=0;
                 }
@@ -406,9 +406,9 @@ public:
                 MPI_Iprobe(0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &flag, &status);
                 if (flag) {
                     terminated=true;
-                    printf("[date=%d] world leader will receive TAG_COUNTDOWN_TERMINATE\n", std::time(0));
+                    printf("[date=%d] universe %d will receive TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
                     MPI_Recv(0, 0, MPI_INT, 0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &status);
-                    printf("[date=%d] world leader did receive TAG_COUNTDOWN_TERMINATE\n", std::time(0));
+                    printf("[date=%d] universe %d did receive TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
                     ret=0;
                 }
                 else {
@@ -692,6 +692,9 @@ int ffs_main(int argc, char **argv) {
             sprintf(strReadData,"read_dump pool/xyz.%s 0 x y z box no format xyz",xyzInit.c_str());
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps, waterGroupName, temperatureMean, &rng);
+            if (local->isLeader) {
+                printf("[date=%d] [universe=%d] [initialFile=%d] [velocitySeed=%d]\n", std::time(0), local->id, xyzInit.c_str(), velocitySeed);
+            }
             lammps_command(lammps,(char *)"run 0 pre yes post no");
             int lambda_calc;
             while (1) {
@@ -715,8 +718,10 @@ int ffs_main(int argc, char **argv) {
             int64_t timestep=lammps->update->ntimestep;
             lammps_command(lammps,(char *)"run 0 pre no post yes");
             if (lambda_calc<=lambda_A) {
-                printf("%3d (xyz.%s)  >==%010d %20lld==>  ___ (__________)\n", xyzInit.c_str(), lambdaInit, velocitySeed, timestep, lambda_calc);
-                continue;
+              if (local->isLeader) {
+                printf("%3d (xyz.%s)  >==%010d %20lld==>  %3d (__________)\n", lambdaInit, xyzInit.c_str(), velocitySeed, timestep, lambda_calc);
+              }
+              continue;
             }
             if (lambda_calc>=lambda_next) {
                 static char strDump[100];
