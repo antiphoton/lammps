@@ -52,8 +52,6 @@ protected:
     static const int TAG_FILEWRITER_LINE=3;
     static const int TAG_FILEREADER=5;
     static const int TAG_STATS_FLUSH=6;
-    static const int TAG_STATS_DATA=7;
-    static const int TAG_FILE_VECTOR=8;
 };
 bool FfsBranch::commInited=false;
 MPI_Comm FfsBranch::commLeader,FfsBranch::commLocal;
@@ -176,7 +174,9 @@ protected:
             if (flag) {
                 int l;
                 MPI_Get_count(&status,MPI_CHAR,&l);
+                printf("[date=%d] world leader will receive TAG_FILEWRITER_LINE\n", std::time(0));
                 MPI_Recv(buffer, l, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
+                printf("[date=%d] world leader did receive TAG_FILEWRITER_LINE\n", std::time(0));
                 putstr0(status.MPI_SOURCE,buffer);
             }
             else {
@@ -196,7 +196,9 @@ private:
         }
         else {
             int l=strlen(s);
+            printf("[date=%d] universe %d will send TAG_FILEWRITER_LINE\n", std::time(0), local->id);
             MPI_Send(s, l + 1, MPI_CHAR, 0, FfsBranch::TAG_FILEWRITER_LINE, FfsBranch::commLeader);
+            printf("[date=%d] universe %d did send TAG_FILEWRITER_LINE\n", std::time(0), local->id);
         }
     }
     int nFlush;
@@ -282,7 +284,9 @@ public:
                 for (j=0;j<nn;j++) {
                     pp[j]=vv[j];
                 }
+                printf("[date=%d] universe %d will send TAG_FILEREADER\n", std::time(0), local->id);
                 MPI_Send(pp, nn, MPI_INT, i, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader);
+                printf("[date=%d] universe %d did send TAG_FILEREADER\n", std::time(0), local->id);
                 delete[] pp;
             }
         }
@@ -291,7 +295,9 @@ public:
             MPI_Probe(0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
             MPI_Get_count(&status,MPI_INT,&n);
             p=new int[n];
+            printf("[date=%d] world leader will receive TAG_FILEREADER\n", std::time(0));
             MPI_Recv(p, n, MPI_INT, 0, FfsBranch::TAG_FILEREADER, FfsBranch::commLeader, &status);
+            printf("[date=%d] world leader did receive TAG_FILEREADER\n", std::time(0));
         }
         if (local->isLeader) {
             int i;
@@ -353,7 +359,9 @@ public:
             remains-=x;
         }
         else {
+            printf("[date=%d] universe %d will send TAG_COUNTDOWN_DONE\n", std::time(0), local->id);
             MPI_Send(&x, 1, MPI_INT, 0, FfsBranch::TAG_COUNTDOWN_DONE, FfsBranch::commLeader);
+            printf("[date=%d] universe %d did send TAG_COUNTDOWN_DONE\n", std::time(0), local->id);
         }
     }
     bool next() {
@@ -369,7 +377,9 @@ public:
                     MPI_Iprobe(MPI_ANY_SOURCE, FfsBranch::TAG_COUNTDOWN_DONE, FfsBranch::commLeader, &flag, &status);
                     if (flag) {
                         int x;
+                        printf("[date=%d] world leader will receive TAG_COUNTDOWN_DONE\n", std::time(0));
                         MPI_Recv(&x, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, FfsBranch::commLeader, &status);
+                        printf("[date=%d] world leader did receive TAG_COUNTDOWN_DONE\n", std::time(0));
                         remains-=x;
                     }
                     else {
@@ -380,7 +390,9 @@ public:
                     terminated=true;
                     int i;
                     for (i = 1; i < FfsBranch::size; i += 1) {
+                        printf("[date=%d] universe %d will send TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
                         MPI_Send(0, 0, MPI_INT, i, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader);
+                        printf("[date=%d] universe %d did send TAG_COUNTDOWN_TERMINATE\n", std::time(0), local->id);
                     }
                     ret=0;
                 }
@@ -394,7 +406,9 @@ public:
                 MPI_Iprobe(0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &flag, &status);
                 if (flag) {
                     terminated=true;
+                    printf("[date=%d] world leader will receive TAG_COUNTDOWN_TERMINATE\n", std::time(0));
                     MPI_Recv(0, 0, MPI_INT, 0, FfsBranch::TAG_COUNTDOWN_TERMINATE, FfsBranch::commLeader, &status);
+                    printf("[date=%d] world leader did receive TAG_COUNTDOWN_TERMINATE\n", std::time(0));
                     ret=0;
                 }
                 else {
@@ -516,107 +530,6 @@ private:
         return c;
     }
 };
-class FfsShootingStats: public FfsFileWriter {
-public:
-    FfsShootingStats():FfsFileWriter("shootingStat.txt") {
-        currentPointer=0;
-        n=0;
-        p=0;
-    }
-    ~FfsShootingStats() {
-    }
-    void addSuccess(int x) {
-        if (!local->isLeader) {
-            return ;
-        }
-        x%=n;
-        p[x*2]++;
-    }
-    void addFailure(int x) {
-        if (!local->isLeader) {
-            return ;
-        }
-        x%=n;
-        p[x*2+1]++;
-    }
-    void flush() {
-        if (!local->isLeader) {
-            return ;
-        }
-        if (world->isLeader) {
-            currentFlushIndicator++;
-            if (currentFlushIndicator>=flushPeriod) {
-                currentFlushIndicator=0;
-                int *y=new int[n*2];
-                int i;
-                for (i = 1; i < FfsBranch::size; i += 1) {
-                    MPI_Send(0, 0, MPI_INT, i, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader);
-                }
-                MPI_Reduce(p, y, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
-                FILE *f=fopen(fileName[currentPointer],"w");
-                currentPointer=(currentPointer+1)%2;
-                for (i=0;i<n;i++) {
-                    int success=y[i*2];
-                    int total=y[i*2]+y[i*2+1];
-                    fprintf(f,"%d (xyz.%s)  :    %d / %d\n",fft->getLambda(i),fft->getName(i).c_str(),success,total);
-                }
-                fclose(f);
-                delete[] y;
-            }
-        }
-        else {
-            int flag;
-            MPI_Status status;
-            MPI_Iprobe(0, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader, &flag, &status);
-            if (flag) {
-                MPI_Recv(0, 0, MPI_INT, 0, FfsBranch::TAG_STATS_FLUSH, FfsBranch::commLeader, &status);
-                MPI_Reduce(p, 0, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
-            }
-        }
-    }
-    void initStat(const FfsFileTree *fft) {
-        if (!local->isLeader) {
-            return ;
-        }
-        this->fft=fft;
-        n=fft->getTotal();
-        p=new int[n*2];
-        int i;
-        for (i=0;i<n*2;i++) {
-            p[i]=0;
-        }
-        currentFlushIndicator=0;
-    }
-    void writeStat() {
-        if (!local->isLeader) {
-            return ;
-        }
-        if (n>0) {
-            int *y=new int[n*2];
-            MPI_Reduce(p, y, n * 2, MPI_INT, MPI_SUM, 0, FfsBranch::commLeader);
-            if (world->isLeader) {
-                int i;
-                for (i=0;i<n;i++) {
-                    int success=y[i*2];
-                    int total=y[i*2]+y[i*2+1];
-                    FfsFileWriter::writeln("%d (xyz.%s)  :    %d / %d",fft->getLambda(i),fft->getName(i).c_str(),success,total);
-                }
-            }
-            delete[] y;
-        }
-        delete[] p;
-        p=0;
-    };
-private:
-    const FfsFileTree *fft;
-    int n;
-    int *p;
-    int currentFlushIndicator;
-    static const int flushPeriod=50;
-    int currentPointer;
-    static const char *(fileName[2]);
-};
-const char *(FfsShootingStats::fileName[2])={"stat_A.txt","stat_B.txt"};
 bool ffsRequested(int argc, char **argv) {
     int i;
     for (i=0;i<argc;i++) {
@@ -651,7 +564,7 @@ class FfsRandomGenerator: public FfsBranch {
             if (!local->isLeader) {
                 return ;
             }
-            std::srand(std::time(0)+world->rank);
+            std::srand(std::time(0) + world->rank * 1234567);
             std::rand();
             std::rand();
         }
@@ -763,14 +676,12 @@ int ffs_main(int argc, char **argv) {
         }
         lammps_command(lammps,(char *)"run 0 pre no post yes");
     }
-    FfsShootingStats fss;
     const int n=lambdaList.size();
     for (int i=1;i+1<n;i++) {
         delete lastTree;
         lastTree=currentTree;
         currentTree=new FfsFileTree(&continuedTrajectory,i);
         lastTree->commit();
-        fss.initStat(lastTree);
         FfsCountdown *fcd = new FfsCountdown(config_each_lambda - continuedTrajectory.countPrecalculated(i));
         const int lambda_next=lambdaList[i+1];
         while (1) {
@@ -789,7 +700,6 @@ int ffs_main(int argc, char **argv) {
                 lambda_calc=(int)lambdaReuslt[0];
                 const int64_t timestep = lammps->update->ntimestep;
                 printStatus(print_every, timestep, lambda_calc, lambda_next);
-                fss.flush();
                 if (lambda_calc<=lambda_A||lambda_calc>=lambda_next) {
                     break;
                 }
@@ -805,11 +715,10 @@ int ffs_main(int argc, char **argv) {
             int64_t timestep=lammps->update->ntimestep;
             lammps_command(lammps,(char *)"run 0 pre no post yes");
             if (lambda_calc<=lambda_A) {
-                fss.addFailure(initConfig);
+                printf("%3d (xyz.%s)  >==%010d %20lld==>  ___ (__________)\n", xyzInit.c_str(), lambdaInit, velocitySeed, timestep, lambda_calc);
                 continue;
             }
             if (lambda_calc>=lambda_next) {
-                fss.addSuccess(initConfig);
                 static char strDump[100];
                 const std::string xyzFinal=currentTree->add(lambda_calc);
                 sprintf(strDump,"write_dump all xyz pool/xyz.%s",xyzFinal.c_str());
@@ -820,7 +729,6 @@ int ffs_main(int argc, char **argv) {
                 continue;
             }
         }
-        fss.writeStat();
     }
     delete lammps;
     delete local;
