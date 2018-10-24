@@ -1,3 +1,4 @@
+#include<unistd.h>
 #include<stdarg.h>
 #include<stdio.h>
 #include<string.h>
@@ -637,6 +638,14 @@ int ffs_main(int argc, char **argv) {
         lastTree=0;
         currentTree=new FfsFileTree(&continuedTrajectory,0);
         while (1) {
+            if (local->id == 0) {
+              sleep(1);
+              if (!fcd->next()) {
+                delete fcd;
+                break;
+              }
+              continue;
+            }
             bool ready=false;
             int lambda;
             while (1) {
@@ -685,6 +694,14 @@ int ffs_main(int argc, char **argv) {
         FfsCountdown *fcd = new FfsCountdown(config_each_lambda - continuedTrajectory.countPrecalculated(i));
         const int lambda_next=lambdaList[i+1];
         while (1) {
+            if (local->id == 0) {
+              sleep(1);
+              if (!fcd->next()) {
+                delete fcd;
+                break;
+              }
+              continue;
+            }
             static char strReadData[100];
             const int initConfig=rng.get();
             const std::string xyzInit=lastTree->getName(initConfig);
