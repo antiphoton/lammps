@@ -710,7 +710,7 @@ int ffs_main(int argc, char **argv) {
             lammps_command(lammps,strReadData);
             int velocitySeed=createVelocity(lammps, waterGroupName, temperatureMean, &rng);
             if (local->isLeader) {
-                printf("[date=%d] [universe=%d] [initialFile=%d] [velocitySeed=%d]\n", std::time(0), local->id, xyzInit.c_str(), velocitySeed);
+                printf("[date=%d] [universe=%d] [initialFile=%s] [velocitySeed=%d]\n", std::time(0), local->id, xyzInit.c_str(), velocitySeed);
             }
             lammps_command(lammps,(char *)"run 0 pre yes post no");
             int lambda_calc;
