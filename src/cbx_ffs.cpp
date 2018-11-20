@@ -640,6 +640,7 @@ int ffs_main(int argc, char **argv) {
         while (1) {
             if (local->id == 0) {
               sleep(1);
+              fileTrajectory.check();
               if (!fcd->next()) {
                 delete fcd;
                 break;
@@ -696,6 +697,7 @@ int ffs_main(int argc, char **argv) {
         while (1) {
             if (local->id == 0) {
               sleep(1);
+              fileTrajectory.check();
               if (!fcd->next()) {
                 delete fcd;
                 break;
@@ -728,12 +730,12 @@ int ffs_main(int argc, char **argv) {
                     break;
                 }
             }
+            lammps_command(lammps,(char *)"run 0 pre no post yes");
             if (!fcd->next()) {
                 delete fcd;
                 break;
             }
             int64_t timestep=lammps->update->ntimestep;
-            lammps_command(lammps,(char *)"run 0 pre no post yes");
             if (lambda_calc<=lambda_A) {
               if (local->isLeader) {
                 printf("%3d (xyz.%s)  >==%010d %20lld==>  %3d (__________)\n", lambdaInit, xyzInit.c_str(), velocitySeed, timestep, lambda_calc);
